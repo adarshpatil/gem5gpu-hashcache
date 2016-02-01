@@ -1,0 +1,18 @@
+backprop;;16;16384;65536
+bfs;;<inputdir>/SampleGraph.txt;<inputdir>/graph4096.txt;<inputdir>/graph1MW_6.txt
+cfd;euler3d;<inputdir>/fvcorr.domn.097K;<inputdir>/fvcorr.domn.193K;<inputdir>/missile.domn.0.2M
+gaussian;;<inputdir>/matrix4.txt;<inputdir>/matrix208.txt;<inputdir>/matrix1024.txt
+heartwall;;<inputdir>/test.avi 1;<inputdir>/test.avi 5;<inputdir>/test.avi 10
+hotspot;;64 2 2 <inputdir>/temp_64 <inputdir>/power_64;512 2 2 <inputdir>/temp_512 <inputdir>/power_512;1024 2 2 <inputdir>/temp_1024 <inputdir>/power_1024
+kmeans;;-o -i <inputdir>/100;-o -i <inputdir>/204800.txt;-o -i <inputdir>/kdd_cup
+lavaMD;;;-boxes1d 10;-boxes1d 10
+leukocyte;;<inputdir>/testfile.avi 10;;
+lud;;-v -i <inputdir>/64.dat;-v -i <inputdir>/512.dat;-v -i <inputdir>/2048.dat
+mummergpu;mummer;;;
+nn;;<inputdir>/filelist1.txt -r 5 -lat 30 -lng 90;<inputdir>/filelist4.txt -r 5 -lat 30 -lng 90;<inputdir>/filelist4.txt -r 5 -lat 30 -lng 90
+nw;needle;32 5;512 10;2048 10
+particlefilter_naive;;-x 16 -y 16 -z 3 -np 10;-x 128 -y 128 -z 10 -np 100;-x 128 -y 128 -z 10 -np 1000
+particlefilter_float;;-x 16 -y 16 -z 3 -np 10;-x 128 -y 128 -z 10 -np 100;-x 128 -y 128 -z 10 -np 1000
+pathfinder;;8 2 1;10000 100 20;100000 100 20
+srad;;16 16 4 5 12 12 0.5 1;512 512 45 327 450 127 0.5 2;2048 2048 0 127 0 127 0.5 2
+streamcluster;;2 3 64 64 64 10 none output.txt 1;5 20 256 32768 32768 1000 none output.txt 1;10 20 256 65536 65536 1000 none output.txt 1

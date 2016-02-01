@@ -1,0 +1,13 @@
+benchmarks
+full_system_files
+gem5-dramcache
+gem5-gpuid
+gem5-l3cache
+build/
+.hg/
+.hgignore
+.hgtags
+results
+.project
+.pydevproject
+m5out/

@@ -1,0 +1,117 @@
+{
+  "backprop":{
+    "inputs":{
+      "test":"16 <nthreads>",
+      "simsmall":"16384 <nthreads>",
+      "simlarge":"65536 <nthreads>",
+      "sim1day":"262144 <nthreads>"
+    },
+    "executable":"backprop"
+  },
+  "bfs":{
+    "inputs":{
+      "test":"<nthreads> <inputdir>/SampleGraph.txt",
+      "simsmall":"<nthreads> <inputdir>/graph4096.txt",
+      "simlarge":"<nthreads> <inputdir>/graph1MW_6.txt",
+      "sim1day":"<nthreads> <inputdir>/graph_300000_320000.txt"
+    },
+    "executable":"bfs"
+  },
+  "heartwall":{
+    "inputs":{
+      "test":"<inputdir>/test.avi 1 <nthreads>",
+      "simsmall":"<inputdir>/test.avi 5 <nthreads>",
+      "simlarge":"<inputdir>/test.avi 10 <nthreads>",
+      "sim1day":"<inputdir>/test.avi 10 <nthreads>"
+    },
+    "executable":"heartwall"
+  },
+  "hotspot":{
+    "inputs":{
+      "test":"64 2 2 <nthreads> <inputdir>/temp_64 <inputdir>/power_64",
+      "simsmall":"512 2 2 <nthreads> <inputdir>/temp_512 <inputdir>/power_512",
+      "simlarge":"1024 2 2 <nthreads> <inputdir>/temp_1024 <inputdir>/power_1024",
+      "sim1day":"512 2 24 <nthreads> <inputdir>/temp_512 <inputdir>/power_512"
+    },
+    "executable":"hotspot"
+  },
+  "kmeans":{
+    "inputs":{
+      "test":"-i <inputdir>/100 -n <nthreads>",
+      "simsmall":"-i <inputdir>/204800.txt -n <nthreads>",
+      "simlarge":"-i <inputdir>/kdd_cup -n <nthreads>"
+    },
+    "executable":"kmeans"
+  },
+  "lavaMD":{
+    "inputs":{
+      "test":"-cores <nthreads>",
+      "simsmall":"-boxes1d 10 -cores <nthreads>",
+      "simlarge":"-boxes1d 10 -cores <nthreads>"
+    },
+    "executable":"lavaMD"
+  },
+  "lud":{
+    "inputs":{
+      "test":"-v -i <inputdir>/64.dat -n <nthreads>",
+      "simsmall":"-i <inputdir>/512.dat -n <nthreads>",
+      "simlarge":"-i <inputdir>/2048.dat -n <nthreads>",
+      "sim1day":"-i <inputdir>/1024.dat -n <nthreads>"
+    },
+    "executable":"lud"
+  },
+  "nn":{
+    "inputs":{
+      "test":"<inputdir>/filelist1.txt 5 30 90",
+      "simsmall":"<inputdir>/filelist4.txt 5 30 90",
+      "simlarge":"<inputdir>/filelist4.txt 5 30 90"
+    },
+    "export":"OMP_NUM_THREADS=<nthreads>",
+    "executable":"nn"
+  },
+  "nw":{
+    "inputs":{
+      "test":"32 5 <nthreads>",
+      "simsmall":"512 10 <nthreads>",
+      "simlarge":"2048 10 <nthreads>",
+      "sim1day":"3072 11 <nthreads>"
+    },
+    "executable":"needle"
+  },
+  "particlefilter_naive":{
+    "inputs":{
+      "test":"-x 16 -y 16 -z 3 -np 10",
+      "simsmall":"-x 128 -y 128 -z 10 -np 100",
+      "simlarge":"-x 128 -y 128 -z 10 -np 1000"
+    },
+    "export":"OMP_NUM_THREADS=<nthreads>",
+    "executable":"particlefilter"
+  },
+  "pathfinder":{
+    "inputs":{
+      "test":"8 2",
+      "simsmall":"10000 100",
+      "simlarge":"100000 100",
+      "sim1day":"16000 100"
+    },
+    "export":"OMP_NUM_THREADS=<nthreads>",
+    "executable":"pathfinder"
+  },
+  "srad":{
+    "inputs":{
+      "test":"16 16 4 5 12 12 <nthreads> 0.5 1",
+      "simsmall":"512 512 45 327 450 127 <nthreads> 0.5 2",
+      "simlarge":"2048 2048 0 127 0 127 <nthreads> 0.5 2"
+    },
+    "executable":"srad"
+  },
+  "streamcluster":{
+    "inputs":{
+      "test":"2 5 4 512 512 10 none output.txt <nthreads>",
+      "simsmall":"5 20 256 32768 32768 1000 none output.txt <nthreads>",
+      "simlarge":"10 20 256 65536 65536 1000 none output.txt <nthreads>",
+      "sim1day":"5 30 64 2048 2048 100 none output.txt <nthreads>"
+    },
+    "executable":"streamcluster"
+  }
+}

@@ -1,0 +1,165 @@
+{
+  "backprop":{
+    "inputs":{
+      "test":"16",
+      "simsmall":"16384",
+      "simlarge":"65536",
+      "sim1day":"262144"
+    },
+    "executable":"backprop"
+  },
+  "bfs":{
+    "inputs":{
+      "test":"<inputdir>/SampleGraph.txt",
+      "simsmall":"<inputdir>/graph4096.txt",
+      "simlarge":"<inputdir>/graph1MW_6.txt",
+      "sim1day":"<inputdir>/graph_300000_320000.txt"
+    },
+    "executable":"bfs"
+  },
+  "cell":{
+    "inputs":{
+      "test":"8 8 8 1 1",
+      "simsmall":"32 32 32 2 1",
+      "simlarge":"256 256 256 16 1",
+      "sim1day":"128 128 128 4 1"
+    },
+    "executable":"cell"
+  },
+  "cfd":{
+    "inputs":{
+      "test":"<inputdir>/fvcorr.domn.192",
+      "simsmall":"<inputdir>/fvcorr.domn.193K",
+      "simlarge":"<inputdir>/missile.domn.0.2M"
+    },
+    "executable":"euler3d"
+  },
+  "gaussian":{
+    "inputs":{
+      "test":"<inputdir>/matrix4.txt",
+      "simsmall":"<inputdir>/matrix208.txt",
+      "simlarge":"<inputdir>/matrix1024.txt"
+    },
+    "executable":"gaussian"
+  },
+  "heartwall":{
+    "inputs":{
+      "test":"<inputdir>/test.avi 1",
+      "simsmall":"<inputdir>/test.avi 5",
+      "simlarge":"<inputdir>/test.avi 10",
+      "sim1day":"<inputdir>/test.avi 10"
+    },
+    "executable":"heartwall"
+  },
+  "hotspot":{
+    "inputs":{
+      "test":"64 2 2 <inputdir>/temp_64 <inputdir>/power_64",
+      "simsmall":"512 2 2 <inputdir>/temp_512 <inputdir>/power_512",
+      "simlarge":"1024 2 2 <inputdir>/temp_1024 <inputdir>/power_1024",
+      "sim1day":"512 2 24 <inputdir>/temp_512 <inputdir>/power_512"
+    },
+    "executable":"hotspot"
+  },
+  "kmeans":{
+    "inputs":{
+      "test":"-o -i <inputdir>/100",
+      "simsmall":"-o -i <inputdir>/204800.txt",
+      "simlarge":"-o -i <inputdir>/kdd_cup"
+    },
+    "executable":"kmeans"
+  },
+  "lavaMD":{
+    "inputs":{
+      "test":"",
+      "simsmall":"-boxes1d 10",
+      "simlarge":"-boxes1d 10"
+    },
+    "executable":"lavaMD"
+  },
+  "leukocyte":{
+    "inputs":{
+      "test":"<inputdir>/testfile.avi 1",
+      "simsmall":"<inputdir>/testfile.avi 2",
+      "simlarge":"<inputdir>/testfile.avi 10"
+    },
+    "executable":"leukocyte"
+  },
+  "lud":{
+    "inputs":{
+      "test":"-v -i <inputdir>/64.dat",
+      "simsmall":"-i <inputdir>/512.dat",
+      "simlarge":"-i <inputdir>/2048.dat",
+      "sim1day":"-i <inputdir>/1024.dat"
+    },
+    "executable":"lud"
+  },
+  "mummergpu":{
+    "inputs":{
+      "test":"-l 2 <inputdir>/shortref.fa <inputdir>/shortqry.fa",
+      "simsmall":"-l 20 <inputdir>/lmono_ref.fna <inputdir>/lmono_reads.fasta",
+      "simlarge":"-l 100 <inputdir>/cbrigg_ref.fna <inputdir>/cbrigg_reads.fasta"
+    },
+    "executable":"mummer"
+  },
+  "nn":{
+    "inputs":{
+      "test":"<inputdir>/filelist1.txt -r 5 -lat 30 -lng 90",
+      "simsmall":"<inputdir>/filelist4.txt -r 5 -lat 30 -lng 90",
+      "simlarge":"<inputdir>/filelist4.txt -r 5 -lat 30 -lng 90"
+    },
+    "executable":"nn"
+  },
+  "nw":{
+    "inputs":{
+      "test":"32 5",
+      "simsmall":"512 10",
+      "simlarge":"2048 10",
+      "sim1day":"3072 11"
+    },
+    "executable":"needle"
+  },
+  "particlefilter_float":{
+    "inputs":{
+      "test":"-x 16 -y 16 -z 3 -np 10",
+      "simsmall":"-x 128 -y 128 -z 10 -np 100",
+      "simlarge":"-x 128 -y 128 -z 10 -np 1000"
+    },
+    "executable":"particlefilter_float",
+    "buildDir":"particlefilter"
+  },
+  "particlefilter_naive":{
+    "inputs":{
+      "test":"-x 16 -y 16 -z 3 -np 10",
+      "simsmall":"-x 128 -y 128 -z 10 -np 100",
+      "simlarge":"-x 128 -y 128 -z 10 -np 1000"
+    },
+    "executable":"particlefilter_naive",
+    "buildDir":"particlefilter"
+  },
+  "pathfinder":{
+    "inputs":{
+      "test":"8 2 1",
+      "simsmall":"10000 100 20",
+      "simlarge":"100000 100 20",
+      "sim1day":"16000 100 20"
+    },
+    "executable":"pathfinder"
+  },
+  "srad":{
+    "inputs":{
+      "test":"16 16 4 5 12 12 0.5 1",
+      "simsmall":"512 512 45 327 450 127 0.5 2",
+      "simlarge":"2048 2048 0 127 0 127 0.5 2"
+    },
+    "executable":"srad"
+  },
+  "streamcluster":{
+    "inputs":{
+      "test":"2 5 4 512 512 10 none output.txt 1",
+      "simsmall":"5 20 256 32768 32768 1000 none output.txt 1",
+      "simlarge":"10 20 256 65536 65536 1000 none output.txt 1",
+      "sim1day":"5 30 64 2048 2048 100 none output.txt 1"
+    },
+    "executable":"streamcluster"
+  }
+}

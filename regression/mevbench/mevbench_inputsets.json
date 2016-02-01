@@ -1,0 +1,90 @@
+{
+  "augreal":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/AugmentedReality/aug_l_1.txt",
+      "m":"-configFile <inputdir>/configs/AugmentedReality/aug_m_1.txt",
+      "h":"-configFile <inputdir>/configs/AugmentedReality/aug_h_1.txt"
+    },
+    "executable":"AugmentedRealityStatic"
+  },
+  "boost":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FeatureClassification/BOOST/boost_l_<nthreads>.txt",
+      "m":"-configFile <inputdir>/configs/FeatureClassification/BOOST/boost_m_<nthreads>.txt",
+      "h":"-configFile <inputdir>/configs/FeatureClassification/BOOST/boost_h_<nthreads>.txt"
+    },
+    "executable":"FeatureClassificationStatic"
+  },
+  "facedet":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FaceDetection/facedet_l_1.txt",
+      "m":"-configFile <inputdir>/configs/FaceDetection/facedet_m_1.txt",
+      "h":"-configFile <inputdir>/configs/FaceDetection/facedet_h_1.txt"
+    },
+    "executable":"FaceDetectionStatic"
+  },
+  "fast":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FeatureExtraction/FAST/FAST_l_<nthreads>.txt",
+      "m":"-configFile <inputdir>/configs/FeatureExtraction/FAST/FAST_m_<nthreads>.txt",
+      "h":"-configFile <inputdir>/configs/FeatureExtraction/FAST/FAST_h_<nthreads>.txt"
+    },
+    "executable":"FeatureExtractionStatic"
+  },
+  "hog":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FeatureExtraction/HoG/HoG_l_<nthreads>.txt",
+      "m":"-configFile <inputdir>/configs/FeatureExtraction/HoG/HoG_m_<nthreads>.txt",
+      "h":"-configFile <inputdir>/configs/FeatureExtraction/HoG/HoG_h_<nthreads>.txt"
+    },
+    "executable":"FeatureExtractionStatic"
+  },
+  "knn":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FeatureClassification/KNN/knn_l_<nthreads>.txt",
+      "m":"-configFile <inputdir>/configs/FeatureClassification/KNN/knn_m_<nthreads>.txt",
+      "h":"-configFile <inputdir>/configs/FeatureClassification/KNN/knn_h_<nthreads>.txt"
+    },
+    "executable":"FeatureClassificationStatic"
+  },
+  "objrecog":{
+    "inputs":{
+      "l":"-noShowWindows -noWaitKey -extractionConfig <inputdir>/configs/ObjectRecognition/SIFT_l_<nthreads>.txt -classificationConfig <inputdir>/configs/ObjectRecognition/objrecog_l_<nthreads>.txt",
+      "m":"-noShowWindows -noWaitKey -extractionConfig <inputdir>/configs/ObjectRecognition/SIFT_m_<nthreads>.txt -classificationConfig <inputdir>/configs/ObjectRecognition/objrecog_m_<nthreads>.txt",
+      "h":"-noShowWindows -noWaitKey -extractionConfig <inputdir>/configs/ObjectRecognition/SIFT_h_<nthreads>.txt -classificationConfig <inputdir>/configs/ObjectRecognition/objrecog_h_<nthreads>.txt"
+    },
+    "executable":"ObjectRecognitionStatic"
+  },  
+  "orb":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FeatureExtraction/ORB/ORB_l_<nthreads>.txt",
+      "m":"-configFile <inputdir>/configs/FeatureExtraction/ORB/ORB_m_<nthreads>.txt",
+      "h":"-configFile <inputdir>/configs/FeatureExtraction/ORB/ORB_h_<nthreads>.txt"
+    },
+    "executable":"FeatureExtractionStatic"
+  },
+  "sift":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FeatureExtraction/SIFT/SIFT_l_<nthreads>.txt",
+      "m":"-configFile <inputdir>/configs/FeatureExtraction/SIFT/SIFT_m_<nthreads>.txt",
+      "h":"-configFile <inputdir>/configs/FeatureExtraction/SIFT/SIFT_h_<nthreads>.txt"
+    },
+    "executable":"FeatureExtractionStatic"
+  },
+  "surf":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FeatureExtraction/SURF/SURF_l_<nthreads>.txt",
+      "m":"-configFile <inputdir>/configs/FeatureExtraction/SURF/SURF_m_<nthreads>.txt",
+      "h":"-configFile <inputdir>/configs/FeatureExtraction/SURF/SURF_h_<nthreads>.txt"
+    },
+    "executable":"FeatureExtractionStatic"
+  },
+  "svm":{
+    "inputs":{
+      "l":"-configFile <inputdir>/configs/FeatureClassification/SVM/svm_l_<nthreads>.txt",
+      "m":"-configFile <inputdir>/configs/FeatureClassification/SVM/svm_m_<nthreads>.txt",
+      "h":"-configFile <inputdir>/configs/FeatureClassification/SVM/svm_h_<nthreads>.txt"
+    },
+    "executable":"FeatureClassificationStatic"
+  }
+}

@@ -1,0 +1,28 @@
+--standard-switch=1
+--warmup-insts=500000
+--maxinsts=40000000
+--caches
+--cpu-type=detailed
+--flush_kernel_end
+--access-host-pagetable
+--sc_l1_size=64kB
+--sc_l1_assoc=4
+--sc_l2_size=1024kB
+--sc_l2_assoc=16
+--gpu_tlb_entries=64
+--gpu_tlb_assoc=4
+--pwc_size=32kB
+--num-cpus=1
+--sys-clock=2.5GHz
+--cpu-clock=2.5GHz
+--l1d_size=32kB
+--l1d_assoc=4
+--l1i_size=16kB
+--l1i_assoc=2
+--l2_size=4096kB
+--l2_assoc=8
+--pf-on
+--total-mem-size=4GB
+--mem-type=DDR3_2133_x64
+--cmd /home/isis/hsa/gem5gpu/benchmarks/rodinia-nocopy/bin/gem5_fusion_bfs
+--options /home/isis/hsa/gem5gpu/benchmarks/rodinia-nocopy/inputs/bfs/graph4096.txt
