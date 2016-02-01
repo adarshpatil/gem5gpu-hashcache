@@ -596,8 +596,8 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
     pendingDelete.clear();
 
     // This is where we enter from the outside world
-    DPRINTF(DRAM, "recvTimingReq: request %s addr %lld size %d\n",
-            pkt->cmdString(), pkt->getAddr(), pkt->getSize());
+    DPRINTF(DRAM, "ADARSH recvTimingReq: request %s addr %lld size %d, ContextId: %d Threadid: %d\n",
+            pkt->cmdString(), pkt->getAddr(), pkt->getSize(), pkt->req->contextId(), pkt->req->threadId());
 
     // simply drop inhibited packets and clean evictions
     if (pkt->memInhibitAsserted() ||
@@ -634,6 +634,10 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
         } else {
             addToReadQueue(pkt, dram_pkt_count);
             readReqs++;
+            if (pkt->req->contextId() == 31)
+                gpuReadReqs++;
+            else
+                cpuReadReqs++;
             bytesReadSys += size;
         }
     } else if (pkt->isWrite()) {
@@ -647,6 +651,10 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
         } else {
             addToWriteQueue(pkt, dram_pkt_count);
             writeReqs++;
+            if (pkt->req->contextId() == 31)
+                gpuWriteReqs++;
+            else
+                cpuWriteReqs++;
             bytesWrittenSys += size;
         }
     } else {
@@ -2148,6 +2156,23 @@ DRAMCtrl::regStats()
 
     pageHitRate = (writeRowHits + readRowHits) /
         (writeBursts - mergedWrBursts + readBursts - servicedByWrQ) * 100;
+
+    // ADARSH
+    gpuReadReqs
+            .name(name() + ".gpuReadReqs")
+            .desc("Number of read requests from GPU");
+
+    gpuWriteReqs
+            .name(name() + ".gpuWriteReqs")
+            .desc("Number of write requests from GPU");
+
+    cpuReadReqs
+                .name(name() + ".cpuReadReqs")
+                .desc("Number of write requests from CPU");
+
+    cpuWriteReqs
+                .name(name() + ".cpuWriteReqs")
+                .desc("Number of write requests from CPU");
 }
 
 void

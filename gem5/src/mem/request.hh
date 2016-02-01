@@ -586,11 +586,18 @@ class Request
         return privateFlags.isSet(VALID_CONTEXT_ID);
     }
 
+    void
+	setContextId(ContextID contextId)
+    {
+        privateFlags.set(VALID_CONTEXT_ID);
+        _contextId = contextId;
+    }
+
     /** Accessor function for context ID.*/
     ContextID
     contextId() const
     {
-        assert(privateFlags.isSet(VALID_CONTEXT_ID));
+        //assert(privateFlags.isSet(VALID_CONTEXT_ID));
         return _contextId;
     }
 
@@ -598,7 +605,7 @@ class Request
     ThreadID
     threadId() const
     {
-        assert(privateFlags.isSet(VALID_THREAD_ID));
+        //assert(privateFlags.isSet(VALID_THREAD_ID));
         return _threadId;
     }
 

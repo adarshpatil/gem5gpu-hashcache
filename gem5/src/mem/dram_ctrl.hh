@@ -830,6 +830,12 @@ class DRAMCtrl : public AbstractMemory
     // DRAM Power Calculation
     Stats::Formula pageHitRate;
 
+    // ADARSH Number of CPU/GPU requests
+    Stats::Scalar gpuReadReqs;
+    Stats::Scalar gpuWriteReqs;
+    Stats::Scalar cpuReadReqs;
+    Stats::Scalar cpuWriteReqs;
+
     // Holds the value of the rank of burst issued
     uint8_t activeRank;
 

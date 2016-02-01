@@ -245,13 +245,13 @@ WarpInstBuffer::generateCoalescedAccesses(Addr addr, size_t size,
     CoalescedAccess *mem_access;
     if (instructionType == LOAD_INST) {
         RequestPtr req = new Request(asid, addr, size, flags, masterId,
-                                     pc, 0, 0);
+                                     pc, 31, 0);
         mem_access = new CoalescedAccess(req, MemCmd::ReadReq, this,
                                          active_lanes);
         coalescedAccesses.push_back(mem_access);
     } else if (instructionType == STORE_INST) {
         RequestPtr req = new Request(asid, addr, size, flags, masterId,
-                                     pc, 0, 0);
+                                     pc, 31, 0);
         uint8_t *pkt_data = new uint8_t[size];
         list<unsigned>::iterator iter = active_lanes.begin();
         for (; iter != active_lanes.end(); iter++) {
@@ -369,7 +369,7 @@ WarpInstBuffer::generateCoalescedAccesses(Addr addr, size_t size,
             atom_data[num_atoms_this_access-1]->lastAccess = true;
 
             RequestPtr req = new Request(asid, addr, size, flags, masterId,
-                                         pc, 0, 0);
+                                         pc, 31, 0);
             CoalescedAccess *mem_access = new CoalescedAccess(req,
                     MemCmd::SwapReq, this, lanes_this_packet, pkt_data);
             coalescedAccesses.push_back(mem_access);

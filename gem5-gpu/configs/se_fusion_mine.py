@@ -1,4 +1,4 @@
-# Copyright (c) 2009-2012 Advanced Micro Devices, Inc.
+# Copyright (c) 2006-2008 The Regents of The University of Michigan
 # Copyright (c) 2012-2015 Mark D. Hill and David A. Wood
 # All rights reserved.
 #
@@ -48,27 +48,11 @@ import Options
 import Ruby
 import Simulation
 
-from FSConfig import *
-from SysPaths import *
-from Benchmarks import *
-# from Caches import *
-
-def cmd_line_template():
-    if options.command_line and options.command_line_file:
-        print "Error: --command-line and --command-line-file are " \
-              "mutually exclusive"
-        sys.exit(1)
-    if options.command_line:
-        return options.command_line
-    if options.command_line_file:
-        return open(options.command_line_file).read().strip()
-    return None
-
 parser = optparse.OptionParser()
 GPUConfig.addGPUOptions(parser)
 GPUMemConfig.addMemCtrlOptions(parser)
 Options.addCommonOptions(parser)
-Options.addFSOptions(parser)
+Options.addSEOptions(parser)
 
 #
 # Add the ruby specific and protocol specific options
@@ -83,11 +67,8 @@ if args:
     print "Error: script doesn't take any positional arguments"
     sys.exit(1)
 
-if buildEnv['TARGET_ISA'] == "arm":
-    fatal("gem5-gpu full system mode does not yet work for ARM!")
-
-if buildEnv['TARGET_ISA'] != "x86":
-    fatal("gem5-gpu doesn't currently work with non-x86 system!")
+if buildEnv['TARGET_ISA'] not in ["x86", "arm"]:
+    fatal("gem5-gpu SE doesn't currently work with non-x86 or non-ARM system!")
 
 #
 # CPU type configuration
@@ -103,7 +84,7 @@ if options.fast_forward:
     assert(CPUClass == AtomicSimpleCPU)
     assert(test_mem_mode == "atomic")
     CPUClass, test_mem_mode = Simulation.getCPUClass("TimingSimpleCPU")
-
+    
 #
 # Memory space configuration
 #
@@ -112,8 +93,16 @@ if options.fast_forward:
 #
 # Setup benchmark to be run
 #
-bm = [SysConfig(disk=options.disk_image)]
-bm[0].memsize = '%dB' % cpu_mem_range.size()
+#process = LiveProcess()
+#process.executable = options.cmd
+#process.cmd = [options.cmd] + options.options.split()
+
+#if options.input != "":
+#    process.input = options.input
+#if options.output != "":
+#    process.output = options.output
+#if options.errout != "":
+#    process.errout = options.errout
 
 # Hard code the cache block width to 128B for now
 # TODO: Remove this if/when block size can be different than 128B
@@ -124,25 +113,28 @@ if options.cacheline_size != 128:
 #
 # Instantiate system
 #
-system = makeLinuxX86System(test_mem_mode, options.num_cpus, bm[0], True,
-                            cmdline=cmd_line_template())
-system.cache_line_size = options.cacheline_size
+system = System(cpu = [CPUClass(cpu_id = i)
+                       for i in xrange(options.num_cpus)],
+                mem_mode = test_mem_mode,
+                mem_ranges = [cpu_mem_range],
+                cache_line_size = options.cacheline_size)
+
+# Create a top-level voltage domain
 system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
+
+# Create a source clock for the system and set the clock period
 system.clk_domain = SrcClockDomain(clock = options.sys_clock,
-                               voltage_domain = system.voltage_domain)
+                                   voltage_domain = system.voltage_domain)
+
+# Create a CPU voltage domain
 system.cpu_voltage_domain = VoltageDomain()
+
+# Create a separate clock domain for the CPUs
 system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
-                                voltage_domain = system.cpu_voltage_domain)
-system.cpu = [CPUClass(cpu_id = i, clk_domain = system.cpu_clk_domain)
-              for i in xrange(options.num_cpus)]
+                                       voltage_domain =
+                                       system.cpu_voltage_domain)
 
 Simulation.setWorkCountOptions(system, options)
-
-if options.kernel is not None:
-    system.kernel = binary(options.kernel)
-
-if options.script is not None:
-    system.readfile = options.script
 
 #
 # Create the GPU
@@ -154,13 +146,10 @@ system.gpu = GPUConfig.createGPU(options, gpu_mem_range)
 #
 system.ruby_clk_domain = SrcClockDomain(clock = options.ruby_clock,
                                         voltage_domain = system.voltage_domain)
-Ruby.create_system(options, True, system, system.iobus, system._dma_ports)
+Ruby.create_system(options, False, system)
 
 system.gpu.ruby = system.ruby
 system.ruby.clk_domain = system.ruby_clk_domain
-
-# connect the PIO bus
-system.iobus.master = system.ruby._io_port.slave
 
 if options.split:
     if options.access_backing_store:
@@ -171,6 +160,32 @@ if options.split:
                                             in_addr_map=False)
 
 #
+# Setup benchmark to be run
+#
+executables = options.cmd.split(';');
+arguments = options.options.split(';');
+
+if options.input != "":
+    process_inputs = options.input.split(';');
+if options.output != "":
+    process_outputs = options.output.split(';');
+if options.errout != "":
+    process_errouts = options.errout.split(';');
+
+for (i, cpu) in enumerate(system.cpu):
+    process = LiveProcess()
+    process.executable = executables [i]
+    process.cmd = [process.executable] + arguments[i].split ()
+    if options.input != "":
+        process.input = process_inputs [i]
+    if options.output != "":
+        process.output = process_outputs [i]
+    if options.errout != "":
+        process.errout = process_errouts [i]
+    cpu.workload = process
+    print "CPU " + `i` + " : " + str(process.cmd)
+    
+#
 # Connect CPU ports
 #
 for (i, cpu) in enumerate(system.cpu):
@@ -179,19 +194,17 @@ for (i, cpu) in enumerate(system.cpu):
     cpu.clk_domain = system.cpu_clk_domain
     cpu.createThreads()
     cpu.createInterruptController()
-    cpu.interrupts.pio = ruby_port.master
-    cpu.interrupts.int_master = ruby_port.slave
-    cpu.interrupts.int_slave = ruby_port.master
     #
     # Tie the cpu ports to the correct ruby system ports
     #
     cpu.icache_port = system.ruby._cpu_ports[i].slave
     cpu.dcache_port = system.ruby._cpu_ports[i].slave
+    cpu.itb.walker.port = system.ruby._cpu_ports[i].slave
+    cpu.dtb.walker.port = system.ruby._cpu_ports[i].slave
     if buildEnv['TARGET_ISA'] == "x86":
-        cpu.itb.walker.port = system.ruby._cpu_ports[i].slave
-        cpu.dtb.walker.port = system.ruby._cpu_ports[i].slave
-    else:
-        fatal("Not sure how to connect TLB walker ports in non-x86 system!")
+        cpu.interrupts.pio = ruby_port.master
+        cpu.interrupts.int_master = ruby_port.slave
+        cpu.interrupts.int_slave = ruby_port.master
 
 #
 # Connect GPU ports
@@ -201,12 +214,15 @@ GPUConfig.connectGPUPorts(system.gpu, system.ruby, options)
 if options.mem_type == "RubyMemoryControl":
     GPUMemConfig.setMemoryControlOptions(system, options)
 
+print "***"
+print options
+print "***"
 #
 # Finalize setup and run
 #
 
-root = Root(full_system = True, system = system)
+root = Root(full_system = False, system = system)
 
-#m5.disableAllListeners()
+m5.disableAllListeners()
 
 Simulation.run(options, root, system, FutureClass)

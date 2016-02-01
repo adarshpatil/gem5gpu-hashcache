@@ -225,8 +225,8 @@ RubyPort::PioSlavePort::recvTimingReq(PacketPtr pkt)
 bool
 RubyPort::MemSlavePort::recvTimingReq(PacketPtr pkt)
 {
-    DPRINTF(RubyPort, "Timing request for address %#x on port %d\n",
-            pkt->getAddr(), id);
+	DPRINTF(RubyPort, "ADARSH Timing request for address %#x on port %d, ContextId: %d Threadid:%d\n",
+			pkt->getAddr(), id, pkt->req->contextId(), pkt->req->threadId());
     RubyPort *ruby_port = static_cast<RubyPort *>(&owner);
 
     if (pkt->memInhibitAsserted())
