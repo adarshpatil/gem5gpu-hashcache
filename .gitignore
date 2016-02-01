@@ -12,3 +12,4 @@ results
 .pydevproject
 m5out/
 results.txt
+*.pyc

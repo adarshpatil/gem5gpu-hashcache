@@ -18,18 +18,18 @@ def worker():
         print ""
         print "Running benchmark..." + threadid + "****\n" + run_command
         print ""
-        time.sleep(5)
-        #sim = subprocess.Popen( run_command , stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=envs, shell=True)
-        #sim.wait()
+        #time.sleep(5)
+        sim = subprocess.Popen( run_command , stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=envs, shell=True)
+        sim.wait()
         print threadid + " Completed job!"
         
         
 
 ## __MAIN__ ##
-hsa = '/home/isis/hsa'
+hsa = '/storage/adarsh/hsa'
 main_prefix = hsa + '/gem5gpu'
 
-num_threads = 2
+num_threads = 8
  
 benchmarks_prefix = main_prefix + '/benchmarks'
 spec_prefix = benchmarks_prefix + '/cpu2006'
@@ -46,12 +46,6 @@ m2 = (spec_prefix + '/GemsFDTD/GemsFDTD_base.amd64',
       spec_prefix + '/xalancbmk/Xalan_base.amd64', 
       spec_prefix + '/soplex/soplex_base.amd64',
       rodinia_prefix + '/bin/gem5_fusion_lud') + tuple([spec_prefix]*8) + (rodinia_prefix,)
-      
-m3 = (spec_prefix + '/cactusADM/cactusADM_base.amd64',
-      spec_prefix + '/libquantum/libquantum_base.amd64',
-      spec_prefix + '/perlbench/perlbench_base.amd64', 
-      spec_prefix + '/sphinx3/sphinx_livepretend_base.amd64',
-      rodinia_prefix + '/bin/gem5_fusion_srad') + tuple([spec_prefix]*9)
 
 m4 = (spec_prefix + '/lbm/lbm_base.amd64',
       spec_prefix + '/bwaves/bwaves_base.amd64',
@@ -97,13 +91,6 @@ benchmarks = {
          --output "%s/GemsFDTD/GemsFDTD.ref.out;%s/leslie3d/leslie3d.ref.out;%s/xalancbmk/xalancbmk.ref.out;%s/soplex/soplex.ref.ref.out;" \
          --options ";;-v %s/xalancbmk/t5.xml %s/xalancbmk/xalanc.xsl;-m3500 %s/soplex/ref.mps;%s/inputs/lud/1024.dat" \
          ''' % m2,
-        
-        '4cg_mix3' :
-         '''--cmd "%s;%s;%s;%s;%s" \
-         --input ";;;;" \
-         --output "%s/cactusADM/cactusADM.ref.out;%s/libquantum/libquantum.ref.out;%s/perlbench/perlbench.ref.splitmail.out;%s/sphinx3/sphinx3.ref.out;" \
-         --options "%s/cactusADM/benchADM.par;1397 8;;-I%s/perlbench/lib %s/perlbench/splitmail.pl 1600 12 26 16 4500;%s/sphinx3/ctlfile %s/sphinx3/ %s/sphinx3/args.an4;2048 2048 0 127 0 127 0.5 2" \
-         ''' % m3,
               
         '4cg_mix4' :
          '''--cmd "%s;%s;%s;%s;%s" \
@@ -142,7 +129,7 @@ benchmarks = {
     }
 
 results_dir = main_prefix + '/results'
-suite_results_dir = results_dir + '/4core-4GB-1cntrl-l3-4M'
+suite_results_dir = results_dir + '/4core-4GB-2cntrl-noL3'
 suite_config = suite_results_dir + '/config' 
 
 # make results dir results -> suite_dir -> benchmarks_dir -> (files)
@@ -151,7 +138,7 @@ if not os.path.exists(suite_results_dir):
 
 common_config_file = main_prefix + '/regression/4core-4G-common_config'
 
-suite_options = '''--l3_size=4096kB --l3_assoc=16 --num-dirs=1 '''
+suite_options = '''--l3_size=4096kB --l3_assoc=16 --num-dirs=2 '''
 
 # create run config from common and suite options and write to  config
 shutil.copyfile(common_config_file, suite_config)

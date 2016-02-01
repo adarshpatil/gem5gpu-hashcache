@@ -1,4 +1,5 @@
 --standard-switch=1
+--fast-forward=10000000000
 --warmup-insts=500000
 --maxinsts=10000000
 --caches
@@ -21,6 +22,6 @@
 --l1i_assoc=8
 --l2_size=256kB
 --l2_assoc=8
---total-mem-size=4GB
+--total-mem-size=8GB
 --mem-type=DDR3_2133_x64
 --pf-on
