@@ -231,19 +231,26 @@ def addCommonOptions(parser):
 
 def addSEOptions(parser):
     # Benchmark options
-    parser.add_option("-c", "--cmd", default="",
-                      help="The binary to run in syscall emulation mode.")
-    parser.add_option("-o", "--options", default="",
-                      help="""The options to pass to the binary, use " "
-                              around the entire string""")
-    parser.add_option("-e", "--env", default="",
-                      help="Initialize workload environment from text file.")
-    parser.add_option("-i", "--input", default="",
-                      help="Read stdin from a file.")
-    parser.add_option("--output", default="",
-                      help="Redirect stdout to a file.")
-    parser.add_option("--errout", default="",
-                      help="Redirect stderr to a file.")
+    #parser.add_option("-c", "--cmd", default="",
+    #                  help="The binary to run in syscall emulation mode.")
+    #parser.add_option("-o", "--options", default="",
+    #                  help="""The options to pass to the binary, use " "
+    #                          around the entire string""")
+    #parser.add_option("-e", "--env", default="",
+    #                  help="Initialize workload environment from text file.")
+    #parser.add_option("-i", "--input", default="",
+    #                  help="Read stdin from a file.")
+    #parser.add_option("--output", default="",
+    #                  help="Redirect stdout to a file.")
+    #parser.add_option("--errout", default="",
+    #                  help="Redirect stderr to a file.")
+    parser.add_option("-b", "--benchmark", default="", 
+                      help="The set of benchmarks to be run separated by ;")
+    parser.add_option("--benchmark_stdout", type="string", default="", 
+                      help="Absolute path stdout redirection for the benchmark")
+    parser.add_option("--benchmark_stderr", type="string", default="", 
+                      help="Absolute path stderr redirection for the benchmark")
+
 
 def addFSOptions(parser):
     # Simulation options

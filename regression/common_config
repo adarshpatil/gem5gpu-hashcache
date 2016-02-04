@@ -1,6 +1,7 @@
 --standard-switch=1
---fast-forward=10000
---maxinsts=100000000
+--fast-forward=10000000
+--warmup=50000
+--maxinsts=10000000
 --caches
 --cpu-type=detailed
 --flush_kernel_end
@@ -21,8 +22,9 @@
 --l1i_assoc=8
 --l2_size=512kB
 --l2_assoc=8
---total-mem-size=2GB
+--total-mem-size=4GB
 --mem-type=DDR3_2133_x64
 --pf-on
---cmd /home/isis/hsa/gem5gpu/benchmarks/rodinia-nocopy/bin/gem5_fusion_bfs
---options /home/isis/hsa/gem5gpu/benchmarks/rodinia-nocopy/inputs/bfs/SampleGraph.txt
+--benchmark needle
+--benchmark_stdout fstdout
+--benchmark_stderr fstderr

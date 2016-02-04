@@ -36,6 +36,7 @@ import m5
 from m5.defines import buildEnv
 from m5.objects import *
 from m5.util import addToPath, fatal
+from duplicity.tempdir import default
 
 addToPath('../../gem5/configs/common')
 addToPath('../../gem5/configs/ruby')
@@ -47,6 +48,7 @@ import GPUMemConfig
 import Options
 import Ruby
 import Simulation
+import Mybench
 
 parser = optparse.OptionParser()
 GPUConfig.addGPUOptions(parser)
@@ -162,29 +164,152 @@ if options.split:
 #
 # Setup benchmark to be run
 #
-executables = options.cmd.split(';');
-arguments = options.options.split(';');
 
-if options.input != "":
-    process_inputs = options.input.split(';');
-if options.output != "":
-    process_outputs = options.output.split(';');
-if options.errout != "":
-    process_errouts = options.errout.split(';');
-
+benchmark = options.benchmark.split(';')
 for (i, cpu) in enumerate(system.cpu):
-    process = LiveProcess()
-    process.executable = executables [i]
-    process.cmd = [process.executable] + arguments[i].split ()
-    if options.input != "":
-        process.input = process_inputs [i]
-    if options.output != "":
-        process.output = process_outputs [i]
-    if options.errout != "":
-        process.errout = process_errouts [i]
-    cpu.workload = process
-    print "CPU " + `i` + " : " + str(process.cmd)
+    if benchmark[i]:
+        # spec 2006 benchmarks
+        if benchmark[i] == 'perlbench':
+            print 'CPU ' + `i` +  '--> perlbench'
+            process = Mybench.perlbench
+        elif benchmark[i] == 'bzip2':
+            print 'CPU ' + `i` +  '--> bzip2'
+            process = Mybench.bzip2
+        elif benchmark[i] == 'gcc':
+            print 'CPU ' + `i` +  '--> gcc'
+            process = Mybench.gcc
+        elif benchmark[i] == 'bwaves':
+            print 'CPU ' + `i` +  '--> bwaves'
+            process = Mybench.bwaves
+        elif benchmark[i] == 'gamess':
+            print 'CPU ' + `i` +  '--> gamess'
+            process = Mybench.gamess
+        elif benchmark[i] == 'mcf':
+            print 'CPU ' + `i` + '--> mcf'
+            process = Mybench.mcf
+        elif benchmark[i] == 'milc':
+            print 'CPU ' + `i` +  '--> milc'
+            process = Mybench.milc
+        elif benchmark[i] == 'zeusmp':
+            print '--> zeusmp'
+            process = Mybench.zeusmp
+        elif benchmark[i] == 'gromacs':
+            print 'CPU ' + `i` +  '--> gromacs'
+            process = Mybench.gromacs
+        elif benchmark[i] == 'cactusADM':
+            print 'CPU ' + `i` +  '--> cactusADM'
+            process = Mybench.cactusADM
+        elif benchmark[i] == 'leslie3d':
+            print 'CPU ' + `i` +  '--> leslie3d'
+            process = Mybench.leslie3d
+        elif benchmark[i] == 'namd':
+            print 'CPU ' + `i` +  '--> namd'
+            process = Mybench.namd
+        elif benchmark[i] == 'gobmk':
+            print 'CPU ' + `i` +  '--> gobmk'
+            process = Mybench.gobmk
+        elif benchmark[i] == 'dealII':
+            print 'CPU ' + `i` +  '--> dealII'
+            process = Mybench.dealII
+        elif benchmark[i] == 'soplex':
+            print 'CPU ' + `i` +  '--> soplex'
+            process = Mybench.soplex
+        elif benchmark[i] == 'povray':
+            print 'CPU ' + `i` +  '--> povray'
+            process = Mybench.povray
+        elif benchmark[i] == 'calculix':
+            print 'CPU ' + `i` +  '--> calculix'
+            process = Mybench.calculix
+        elif benchmark[i] == 'hmmer':
+            print 'CPU ' + `i` +  '--> hmmer'
+            process = Mybench.hmmer
+        elif benchmark[i] == 'sjeng':
+            print 'CPU ' + `i` +  '--> sjeng'
+            process = Mybench.sjeng
+        elif benchmark[i] == 'GemsFDTD':
+            print 'CPU ' + `i` +  '--> GemsFDTD'
+            process = Mybench.GemsFDTD
+        elif benchmark[i] == 'libquantum':
+            print 'CPU ' + `i` +  '--> libquantum'
+            process = Mybench.libquantum
+        elif benchmark[i] == 'h264ref':
+            print 'CPU ' + `i` +  '--> h264ref'
+            process = Mybench.h264ref
+        elif benchmark[i] == 'tonto':
+            print 'CPU ' + `i` +  '--> tonto'
+            process = Mybench.tonto
+        elif benchmark[i] == 'lbm':
+            print 'CPU ' + `i` +  '--> lbm'
+            process = Mybench.lbm
+        elif benchmark[i] == 'omnetpp':
+            print 'CPU ' + `i` +  '--> omnetpp'
+            process = Mybench.omnetpp
+        elif benchmark[i] == 'astar':
+            print 'CPU ' + `i` +  '--> astar'
+            process = Mybench.astar
+        elif benchmark[i] == 'wrf':
+            print 'CPU ' + `i` +  '--> wrf'
+            process = Mybench.wrf
+        elif benchmark[i] == 'sphinx3':
+            print 'CPU ' + `i` +  '--> sphinx3'
+            process = Mybench.sphinx3
+        elif benchmark[i] == 'xalancbmk':
+            print 'CPU ' + `i` +  '--> xalancbmk'
+            process = Mybench.xalancbmk
+        elif benchmark[i] == 'specrand_i':
+            print 'CPU ' + `i` +  '--> specrand_i'
+            process = Mybench.specrand_i
+        elif benchmark[i] == 'specrand_f':
+            print 'CPU ' + `i` +  '--> specrand_f'
+            process = Mybench.specrand_f
+
+        # rodinia benchmarks
+        elif benchmark[i] == 'backprop':
+            print 'CPU ' + `i` +  '--> backprop'
+            process = Mybench.backprop
+        elif benchmark[i] == 'bfs':
+            print 'CPU ' + `i` +  '--> bfs'
+            process = Mybench.bfs
+        elif benchmark[i] == 'hotspot':
+            print 'CPU ' + `i` +  '--> hotspot'
+            process = Mybench.hotspot
+        elif benchmark[i] == 'kmeans':
+            print 'CPU ' + `i` +  '--> kmeans '
+            process = Mybench.kmeans
+        elif benchmark[i] == 'mummer':
+            print 'CPU ' + `i` +  '--> mummer'
+            process = Mybench.mummer
+        elif benchmark[i] == 'needle':
+            print 'CPU ' + `i` +  '--> needle'
+            process = Mybench.needle
+        elif benchmark[i] == 'lud':
+            print 'CPU ' + `i` +  '--> lud'
+            process = Mybench.lud
+        elif benchmark[i] == 'streamcluster':
+            print 'CPU ' + `i` +  '--> streamcluster'
+            process = Mybench.streamcluster
+        elif benchmark[i] == 'gaussian':
+            print 'CPU ' + `i` +  '--> gaussian'
+            process = Mybench.gaussian
+        elif benchmark[i] == 'particlefilter_naive':
+            print 'CPU ' + `i` +  '--> particlefilter_naive'
+            process = Mybench.particlefilter_naive
+        else:
+            print "No recognized benchmark selected! Exiting."
+            sys.exit(1)
+    else:
+        print >> sys.stderr, "Need --benchmark switch to specify workload. Exiting!\n"
+        sys.exit(1)
+
+    # Set process stdout/stderr
+    if options.benchmark_stdout:
+        process.output = options.benchmark_stdout
+        print "Process stdout file: " + process.output
+    if options.benchmark_stderr:
+        process.errout = options.benchmark_stderr
+        print "Process stderr file: " + process.errout
     
+    cpu.workload = process
 #
 # Connect CPU ports
 #
