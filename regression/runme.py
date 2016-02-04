@@ -89,8 +89,8 @@ for benchmark in benchmarks.keys():
         os.makedirs(suite_results_dir+'/'+benchmark)
     
     run_command = command + suite_results_dir + '/' + benchmark + ' ' + main_prefix +'/gem5-gpu/configs/se_fusion_mine.py `cat '+ \
-                suite_config+'`  --benchmark '+ benchmarks[benchmark] + \
-                ' --benchmark_stdout ' + suite_results_dir + '/' + benchmark + '/bench-stdout'
+                suite_config+'`  --benchmark "'+ benchmarks[benchmark] + '"' + \
+                ' --benchmark_stdout ' + suite_results_dir + '/' + benchmark + '/bench-stdout' + \
                 ' --benchmark_stderr ' + suite_results_dir + '/' + benchmark + '/bench-stderr'
     sims.put(run_command)
     

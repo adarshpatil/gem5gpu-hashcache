@@ -36,7 +36,6 @@ import m5
 from m5.defines import buildEnv
 from m5.objects import *
 from m5.util import addToPath, fatal
-from duplicity.tempdir import default
 
 addToPath('../../gem5/configs/common')
 addToPath('../../gem5/configs/ruby')

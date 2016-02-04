@@ -1,7 +1,7 @@
 --standard-switch=1
---fast-forward=10000000000
+--fast-forward=15000000000
 --warmup-insts=500000
---maxinsts=10000000
+--maxinsts=1000000000
 --caches
 --cpu-type=detailed
 --flush_kernel_end
@@ -13,7 +13,7 @@
 --gpu_tlb_entries=64
 --gpu_tlb_assoc=4
 --pwc_size=32kB
---num-cpus=4
+--num-cpus=5
 --sys-clock=2.5GHz
 --cpu-clock=2.5GHz
 --l1d_size=32kB
