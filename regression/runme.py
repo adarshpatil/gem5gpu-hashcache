@@ -25,12 +25,12 @@ def worker():
         time.sleep(5)
         #sim = subprocess.Popen( run_command , stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=envs, shell=True)
         #sim.wait()
-        print threadid + " Completed job!"
+        print threadid + " COMPLETED JOB!"
         
         
 
 ## __MAIN__ ##
-hsa = '/home/isis/hsa'
+hsa = '/storage/adarsh/hsa'
 main_prefix = hsa + '/gem5gpu'
 
 num_threads = 8
@@ -40,21 +40,21 @@ benchmarks = {
         '4cg_mix2' : 'GemsFDTD;leslie3d;xalancbmk;soplex;lud',
         '4cg_mix3' : 'cactusADM;libquantum;tonto;sphinx3;particlefilter_naive',
         '4cg_mix4' : 'lbm;bwaves;zeusmp;mcf;kmeans',
-        '4cg_mix5' : 'soplex;bzip2;gobmk;gaussian;',
+        '4cg_mix5' : 'soplex;bzip2;gobmk;hmmer;gaussian',
         '4cg_mix6' : 'milc;GemsFDTD;cactusADM;lbm;backprop',
         '4cg_mix7' : 'mcf;omnetpp;soplex;leslie3d;hotspot',
         '4cg_mix8' : 'bwaves;gobmk;zeusmp;gcc;needle'
     }
 
 results_dir = main_prefix + '/results'
-suite_results_dir = results_dir + '/4core-4GB-2cntrl-noL3'
+suite_results_dir = results_dir + '/4core-8GB-2cntrl-noL3'
 suite_config = suite_results_dir + '/config' 
 
 # create results dir /results/suite_dir/benchmarks_dir/(files)
 if not os.path.exists(suite_results_dir):
     os.makedirs(suite_results_dir)
 
-common_config_file = main_prefix + '/regression/4core-4G-common_config'
+common_config_file = main_prefix + '/regression/4core-8G-common_config'
 
 suite_options = '''--l3_size=4096kB --l3_assoc=16 --num-dirs=2 '''
 

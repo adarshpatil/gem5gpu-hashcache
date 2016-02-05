@@ -56,6 +56,10 @@ def _listMemTypes(option, opt, value, parser):
     MemConfig.print_mem_list()
     sys.exit(0)
 
+def _listDramcacheTypes(option, opt, value, parser):
+    MemConfig.print_dramcache_list()
+    sys.exit(0)
+
 def addCommonOptions(parser):
     # system options
     parser.add_option("--list-cpu-types",
@@ -228,6 +232,18 @@ def addCommonOptions(parser):
                       choices=["arm", "thumb", "aarch64"],
                       help="ARM instruction set.")
 
+    # DRAM cache options
+    parser.add_option("--dramcache", action="store_true", default=False,
+                      help="add DRAMCache to memory hierarchy true/false")
+    parser.add_option("--dramcache_size", type="string", default="512MB")
+    parser.add_option("--dramcache_assoc", type="int", default=1)
+    parser.add_option("--dramcache_block_size", type="int", default=128)
+    parser.add_option("--dramcache-type", default="HMC_2500_x32_Cache",
+                      type="choice", choices=MemConfig.dramcache_names(),
+                      help = "type of memory to use")
+    parser.add_option("--list-dramcache-types", action="callback",
+                      callback=_listDramcacheTypes,
+                      help="List available DRAMCache types")
 
 def addSEOptions(parser):
     # Benchmark options

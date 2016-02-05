@@ -9,6 +9,7 @@ build/
 .hgtags
 results
 .project
+.cproject
 .pydevproject
 m5out/
 results.txt

@@ -685,10 +685,23 @@ def run(options, root, testsys, cpu_class):
         if options.fast_forward:
             m5.stats.reset()
         print "**** REAL SIMULATION ****"
+        if options.maxinsts:
+            numProcessorsCompleted = 0
+            while numProcessorsCompleted < options.num_cpus:
+                startTick = m5.curTick()
+                while startTick == m5.curTick():
+                    exit_event = m5.simulate(maxtick)
+                    exit_cause = exit_event.getCause()
+                    print exit_cause
+                    if exit_event.getCause() != "a thread reached the max instruction count":
+                        break
+                    numProcessorsCompleted += 1
+                    print 'Cores completed = %d' %(numProcessorsCompleted,)
+                    m5.stats.dump()
 
         # If checkpoints are being taken, then the checkpoint instruction
         # will occur in the benchmark code it self.
-        if options.repeat_switch and maxtick > options.repeat_switch:
+        elif options.repeat_switch and maxtick > options.repeat_switch:
             exit_event = repeatSwitch(testsys, repeat_switch_cpu_list,
                                       maxtick, options.repeat_switch)
         else:

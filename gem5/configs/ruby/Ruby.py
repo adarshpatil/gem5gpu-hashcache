@@ -112,25 +112,48 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
     # for each address range as the abstract memory can handle only one
     # contiguous address range as of now.
     for dir_cntrl in dir_cntrls:
+        # Create 1 instance of DRAMCache per directory controller
+        if options.dramcache:
+            dramcache_ctrl = MemConfig.create_dramcache_ctrl(
+                MemConfig.get_cache(options.dramcache_type), system.mem_ranges[0],
+                index, options.dramcache_size,
+                options.dramcache_assoc, options.dramcache_block_size)
+
+            mem_ctrls.append(dramcache_ctrl)
+            dir_cntrl.memory = dramcache_ctrl.port
+
         dir_cntrl.directory.numa_high_bit = numa_bit
 
         crossbar = None
         if len(system.mem_ranges) > 1:
             crossbar = IOXBar()
             crossbars.append(crossbar)
-            dir_cntrl.memory = crossbar.slave
+            if options.dramcache:
+                dramcache_ctrl.memoryport = crossbar.slave
+            else:
+                dir_cntrl.memory = crossbar.slave
+
 
         for r in system.mem_ranges:
-            mem_ctrl = MemConfig.create_mem_ctrl(
-                MemConfig.get(options.mem_type), r, index, options.num_dirs,
-                int(math.log(options.num_dirs, 2)), options.cacheline_size)
+            # if dramcache exists interleave at dramcache_block_size
+            if options.dramcache:
+                mem_ctrl = MemConfig.create_mem_ctrl(
+                    MemConfig.get(options.mem_type), r, index, options.num_dirs,
+                    int(math.log(options.num_dirs, 2)), options.dramcache_block_size)
+            else:
+                mem_ctrl = MemConfig.create_mem_ctrl(
+                    MemConfig.get(options.mem_type), r, index, options.num_dirs,
+                    int(math.log(options.num_dirs, 2)), options.cacheline_size)
 
             mem_ctrls.append(mem_ctrl)
 
             if crossbar != None:
                 mem_ctrl.port = crossbar.master
             else:
-                mem_ctrl.port = dir_cntrl.memory
+                if options.dramcache:
+                    mem_ctrl.port = dramcache_ctrl.memoryport
+                else:
+                    mem_ctrl.port = dir_cntrl.memory
 
         index += 1
 

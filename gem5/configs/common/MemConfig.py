@@ -40,10 +40,13 @@ import m5.objects
 import inspect
 import sys
 from textwrap import  TextWrapper
-
 # Dictionary of mapping names of real memory controller models to
 # classes.
 _mem_classes = {}
+
+#Dictionary of mapping names of real dramcache controller models to
+# classes
+_dramcache_classes = {}
 
 def is_mem_class(cls):
     """Determine if a class is a memory controller that can be instantiated"""
@@ -56,12 +59,33 @@ def is_mem_class(cls):
     except TypeError:
         return False
 
+def is_dramcache_class(cls):
+    """Determine if a class is a memory controller that can be instantiated"""
+
+    # We can't use the normal inspect.isclass because the ParamFactory
+    # and ProxyFactory classes have a tendency to confuse it.
+    try:
+        return issubclass(cls, m5.objects.DRAMCacheCtrl) and \
+            not cls.abstract
+    except TypeError:
+        return False
+
 def get(name):
     """Get a memory class from a user provided class name."""
 
     try:
         mem_class = _mem_classes[name]
         return mem_class
+    except KeyError:
+        print "%s is not a valid memory controller." % (name,)
+        sys.exit(1)
+
+def get_cache(name):
+    """Get a dramcache class from a user provided class name."""
+
+    try:
+        dramcache_class = _dramcache_classes[name]
+        return dramcache_class
     except KeyError:
         print "%s is not a valid memory controller." % (name,)
         sys.exit(1)
@@ -81,13 +105,46 @@ def print_mem_list():
             for line in doc_wrapper.wrap(doc):
                 print line
 
+def print_dramcache_list():
+    """Print a list of available dramcache classes"""
+
+    print "Available DRAMCache classes:"
+    for name, cls in _dramcache_classes.items():
+        print "\t%s" % name
+
+        # Try to extract the class documentation from the class help
+        # string.
+        doc = inspect.getdoc(cls)
+        if doc:
+            for line in doc_wrapper.wrap(doc):
+                print line
+
 def mem_names():
     """Return a list of valid memory names."""
     return _mem_classes.keys()
 
+def dramcache_names():
+    return _dramcache_classes.keys()
+
 # Add all memory controllers in the object hierarchy.
 for name, cls in inspect.getmembers(m5.objects, is_mem_class):
     _mem_classes[name] = cls
+
+for name, cls in inspect.getmembers(m5.objects, is_dramcache_class):
+    _dramcache_classes[name] = cls
+
+def create_dramcache_ctrl(cls, r, i, dcache_size, dcache_assoc, dcache_block_size):
+    """
+    Helper function for creating DRAMCache controller from the given options
+    This function is invoked from Ruby and dramcache is attached to memory
+    """
+    dramcache_ctrl = cls()
+    dramcache_ctrl.in_addr_map = False
+    dramcache_ctrl.conf_table_reported = False
+    dramcache_ctrl.dramcache_size = m5.objects.MemorySize(dcache_size)
+    dramcache_ctrl.range = m5.objects.AddrRange(r.start, r.start + r.size()-1)
+
+    return dramcache_ctrl
 
 def create_mem_ctrl(cls, r, i, nbr_mem_ctrls, intlv_bits, intlv_size):
     """

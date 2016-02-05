@@ -8,7 +8,7 @@ from m5.defines import buildEnv
 from m5.objects import *
 from m5.util import addToPath, fatal
 
-base_dir = '/home/isis/hsa/gem5gpu/benchmarks/' 
+base_dir = '/storage/adarsh/hsa/gem5gpu/benchmarks/' 
 binary_dir = base_dir + 'cpu2006/'
 my_suffix = '_base.amd64'
 data_dir= base_dir + 'cpu2006/'

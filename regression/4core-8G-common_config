@@ -4,6 +4,7 @@
 --maxinsts=1000000000
 --caches
 --cpu-type=detailed
+--clusters=8
 --flush_kernel_end
 --access-host-pagetable
 --sc_l1_size=64kB
