@@ -20,9 +20,9 @@ data_dir= base_dir + 'cpu2006/'
 bzip2 = LiveProcess()
 bzip2.executable = binary_dir+'401.bzip2/bzip2'
 bzip2.cwd = binary_dir+'401.bzip2'
-data='input.program'
+data='liberty.jpg'
 #data=bzip2.cwd+'input.program'
-bzip2.cmd = [bzip2.executable] + [data, '280']
+bzip2.cmd = [bzip2.executable] + [data, '30']
 
 #410.bwaves
 bwaves = LiveProcess()
@@ -95,10 +95,10 @@ namd.output='namd.stdout'
 gobmk=LiveProcess()
 gobmk.executable =  binary_dir+'445.gobmk/gobmk'
 gobmk.cwd =  binary_dir+'445.gobmk'
-stdin=data_dir+'445.gobmk/nngs.tst'
+stdin=data_dir+'445.gobmk/score2.tst'
 gobmk.cmd = [gobmk.executable]+['--quiet','--mode','gtp']
 gobmk.input=stdin
-gobmk.output='nngs.out'
+gobmk.output='score2.out'
 
 #447.dealII
 dealII=LiveProcess()
@@ -197,9 +197,9 @@ astar=LiveProcess()
 astar.cwd =  binary_dir+'473.astar'
 astar.executable =  binary_dir+'473.astar/astar'
 #data = [data_dir]+['473.astar/rivers.cfg']
-data = ['rivers.cfg']
-astar.cmd = [astar.executable]+['rivers.cfg']
-astar.output = 'rivers.out'
+data = ['BigLakes2048.cfg']
+astar.cmd = [astar.executable]+['BigLakes2048.cfg']
+astar.output = 'BigLakes2048.cfg'
 
 #481.wrf
 wrf=LiveProcess()
@@ -271,9 +271,10 @@ needle = LiveProcess()
 needle.executable = binary_dir + 'gem5_fusion_needle'
 needle.cmd = [needle.executable] + ['2048', '10']
 
-# streamcluster - not working
+# streamcluster
 streamcluster = LiveProcess()
 streamcluster.executable = binary_dir + 'gem5_fusion_streamcluster'
+streamcluster.cmd = [streamcluster.executable] + ['10', '20', '256', '65536', '65536', '1000', 'none', 'output.txt', '1']
 
 # lud
 lud = LiveProcess()
@@ -288,12 +289,19 @@ gaussian.executable = binary_dir + 'gem5_fusion_gaussian'
 data = data_dir + 'gaussian/matrix1024.txt'
 gaussian.cmd = [gaussian.executable] + [data]
 
-# particlefilter_native
+# particlefilter_naive
 particlefilter_naive = LiveProcess()
 particlefilter_naive.executable = binary_dir + 'gem5_fusion_particlefilter_naive'
 particlefilter_naive.cmd = [particlefilter_naive.executable] + ['-x', '128', '-y', '128', '-z', '10', '-np', '1000']
 
+# particlefilter_float
+particlefilter_float = LiveProcess()
+particlefilter_float.executable = binary_dir + 'gem5_fusion_particlefilter_float'
+particlefilter_float.cmd = [particlefilter_float.executable] + ['-x', '128', '-y', '128', '-z', '10', '-np', '1000']
 
-
-
+# heartwall
+hearwall = LiveProcess()
+heartwall.executable = binary_dir + 'gem5_fusion_heartwall'
+data = data_dir + 'test.avi'
+heartwall.cnd = [heartwall.executable] + [data] + ['10']
 

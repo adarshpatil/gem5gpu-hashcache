@@ -42,8 +42,10 @@ benchmarks = {
         '4cg_mix4' : 'lbm;bwaves;zeusmp;mcf;kmeans',
         '4cg_mix5' : 'soplex;bzip2;gobmk;hmmer;gaussian',
         '4cg_mix6' : 'milc;GemsFDTD;cactusADM;lbm;backprop',
-        '4cg_mix7' : 'mcf;omnetpp;soplex;leslie3d;hotspot',
-        '4cg_mix8' : 'bwaves;gobmk;zeusmp;gcc;needle'
+        '4cg_mix7' : 'mcf;omnetpp;soplex;leslie3d;streamcluster',
+        '4cg_mix8' : 'bwaves;gobmk;zeusmp;gcc;needle',
+        '4cg_mix9' : 'gcc;milc;astar;leslie3d;hotspot',
+        '4cg_mix10': 'astar;bzip2;sphinx3;xalancbmk;heartwall'
     }
 
 results_dir = main_prefix + '/results'
