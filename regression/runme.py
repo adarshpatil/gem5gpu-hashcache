@@ -6,7 +6,10 @@ import os
 import subprocess
 import shutil
 import time
-import Queue
+try:
+    import Queue as Queue
+except:
+    import queue as Queue
 import threading
 
 sims = Queue.Queue()
@@ -16,16 +19,16 @@ def worker():
     while True:
         run_command = sims.get()
         if run_command is None:
-            print "Nothing in queue, Killing " + threadid
+            print ("Nothing in queue, Killing " + threadid)
             return
-        print "Got item, Remaining queue size "+ str(sims.qsize())
-        print ""
-        print "Running benchmark..." + threadid + "****\n" + run_command + "\n"
-        print ""
-        time.sleep(5)
-        #sim = subprocess.Popen( run_command , stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=envs, shell=True)
-        #sim.wait()
-        print threadid + " COMPLETED JOB!"
+        print ("Got item, Remaining queue size "+ str(sims.qsize()))
+        print ("")
+        print ("Running benchmark..." + threadid + "****\n" + run_command + "\n")
+        print ("")
+        #time.sleep(5)
+        sim = subprocess.Popen( run_command , stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=envs, shell=True)
+        sim.wait()
+        print (threadid + " COMPLETED JOB!")
         
         
 
@@ -80,8 +83,20 @@ envs['NVIDIA_CUDA_SDK_LOCATION'] = hsa+'/NVIDIA_GPU_Computing_SDK/C'
 # form command to be executed
 command = '''build/X86_VI_hammer_GPU/gem5.opt -r --stdout-file=stdout -e --stderr-file=stderr --outdir '''
 
-    
-for benchmark in benchmarks.keys():
+import argparse
+parser = argparse.ArgumentParser(description='Run specified workloads parallely')
+
+parser.add_argument('--run_mix', default="",
+                   help='the list of workload mix to run separated by ;')
+parser.add_argument('--threads', default=1,
+                   help='number of simulations to run in parallel')
+
+args = parser.parse_args()
+num_threads=int(args.threads)
+run_mix = args.run_mix.split(';')
+
+for benchmark in run_mix:
+    print ("Got benchmark " + benchmark)
     if not os.path.exists(suite_results_dir+'/'+benchmark):
         os.makedirs(suite_results_dir+'/'+benchmark)
     else:
@@ -96,7 +111,7 @@ for benchmark in benchmarks.keys():
                 ' --benchmark_stderr ' + suite_results_dir + '/' + benchmark + '/bench-stderr'
     sims.put(run_command)
     
-print "intial queue size " + str(sims.qsize())
+print ("intial queue size " + str(sims.qsize()))
 threads = [ threading.Thread(target=worker) for _i in range(num_threads) ]
 for thread in threads:
     thread.start()

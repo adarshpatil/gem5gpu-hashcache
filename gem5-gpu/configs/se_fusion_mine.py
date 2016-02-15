@@ -293,6 +293,9 @@ for (i, cpu) in enumerate(system.cpu):
         elif benchmark[i] == 'particlefilter_naive':
             print 'CPU ' + `i` +  '--> particlefilter_naive'
             process = Mybench.particlefilter_naive
+        elif benchmark[i] == 'heartwall':
+            print 'CPU ' + `i` +  '--> heartwall'
+            process = Mybench.heartwall
         else:
             print "No recognized benchmark selected! Exiting."
             sys.exit(1)

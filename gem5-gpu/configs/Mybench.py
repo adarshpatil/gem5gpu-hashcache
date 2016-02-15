@@ -300,8 +300,8 @@ particlefilter_float.executable = binary_dir + 'gem5_fusion_particlefilter_float
 particlefilter_float.cmd = [particlefilter_float.executable] + ['-x', '128', '-y', '128', '-z', '10', '-np', '1000']
 
 # heartwall
-hearwall = LiveProcess()
+heartwall = LiveProcess()
 heartwall.executable = binary_dir + 'gem5_fusion_heartwall'
 data = data_dir + 'test.avi'
-heartwall.cnd = [heartwall.executable] + [data] + ['10']
+heartwall.cmd = [heartwall.executable] + [data] + ['10']
 
