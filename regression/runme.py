@@ -39,6 +39,7 @@ main_prefix = hsa + '/gem5gpu'
 num_threads = 8
  
 benchmarks = {
+        # CPU - GPU workload mix
         '4cg_mix1' : 'milc;mcf;omnetpp;gcc;bfs',
         '4cg_mix2' : 'GemsFDTD;leslie3d;xalancbmk;soplex;lud',
         '4cg_mix3' : 'cactusADM;libquantum;tonto;sphinx3;particlefilter_naive',
@@ -48,7 +49,19 @@ benchmarks = {
         '4cg_mix7' : 'mcf;omnetpp;soplex;leslie3d;streamcluster',
         '4cg_mix8' : 'bwaves;gobmk;zeusmp;gcc;needle',
         '4cg_mix9' : 'gcc;milc;astar;leslie3d;hotspot',
-        '4cg_mix10': 'astar;bzip2;sphinx3;xalancbmk;heartwall'
+        '4cg_mix10': 'astar;bzip2;sphinx3;xalancbmk;heartwall',
+
+        # Only CPU workloads mixes
+        '4c_mix1' : 'milc;mcf;omnetpp;gcc',
+        '4c_mix2' : 'GemsFDTD;leslie3d;xalancbmk;soplex',
+        '4c_mix3' : 'cactusADM;libquantum;tonto;sphinx3',
+        '4c_mix4' : 'lbm;bwaves;zeusmp;mcf',
+        '4c_mix5' : 'soplex;bzip2;gobmk;hmmer',
+        '4c_mix6' : 'milc;GemsFDTD;cactusADM;lbm',
+        '4c_mix7' : 'mcf;omnetpp;soplex;leslie3d',
+        '4c_mix8' : 'bwaves;gobmk;zeusmp;gcc,
+        '4c_mix9' : 'gcc;milc;astar;leslie3d',
+        '4c_mix10': 'astar;bzip2;sphinx3;xalancbmk'
     }
 
 results_dir = main_prefix + '/results'
