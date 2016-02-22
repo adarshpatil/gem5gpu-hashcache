@@ -59,9 +59,16 @@ benchmarks = {
         '4c_mix5' : 'soplex;bzip2;gobmk;hmmer',
         '4c_mix6' : 'milc;GemsFDTD;cactusADM;lbm',
         '4c_mix7' : 'mcf;omnetpp;soplex;leslie3d',
-        '4c_mix8' : 'bwaves;gobmk;zeusmp;gcc,
+        '4c_mix8' : 'bwaves;gobmk;zeusmp;gcc',
         '4c_mix9' : 'gcc;milc;astar;leslie3d',
-        '4c_mix10': 'astar;bzip2;sphinx3;xalancbmk'
+        '4c_mix10': 'astar;bzip2;sphinx3;xalancbmk',
+        'n1' : '462;459;470;433',
+        'n2' : '429;462;471;473',
+        'n3' : '410;473;445;433',
+        'n4' : '462;459;445;410',
+        'n5' : '429;456;450;459',
+        'n6' : '403;445;459;462',
+        'n7' : '403;433;470;410'
     }
 
 results_dir = main_prefix + '/results'

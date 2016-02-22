@@ -168,97 +168,97 @@ benchmark = options.benchmark.split(';')
 for (i, cpu) in enumerate(system.cpu):
     if benchmark[i]:
         # spec 2006 benchmarks
-        if benchmark[i] == 'perlbench':
+        if benchmark[i] == 'perlbench' or benchmark[i] == '400':
             print 'CPU ' + `i` +  '--> perlbench'
             process = Mybench.perlbench
-        elif benchmark[i] == 'bzip2':
+        elif benchmark[i] == 'bzip2' or benchmark[i] == '401':
             print 'CPU ' + `i` +  '--> bzip2'
             process = Mybench.bzip2
-        elif benchmark[i] == 'gcc':
+        elif benchmark[i] == 'gcc' or benchmark[i] == '403':
             print 'CPU ' + `i` +  '--> gcc'
             process = Mybench.gcc
-        elif benchmark[i] == 'bwaves':
+        elif benchmark[i] == 'bwaves' or benchmark[i] == '410':
             print 'CPU ' + `i` +  '--> bwaves'
             process = Mybench.bwaves
-        elif benchmark[i] == 'gamess':
+        elif benchmark[i] == 'gamess' or benchmark[i] == '416':
             print 'CPU ' + `i` +  '--> gamess'
             process = Mybench.gamess
-        elif benchmark[i] == 'mcf':
+        elif benchmark[i] == 'mcf' or benchmark[i] == '429':
             print 'CPU ' + `i` + '--> mcf'
             process = Mybench.mcf
-        elif benchmark[i] == 'milc':
+        elif benchmark[i] == 'milc' or benchmark[i] == '433':
             print 'CPU ' + `i` +  '--> milc'
             process = Mybench.milc
-        elif benchmark[i] == 'zeusmp':
+        elif benchmark[i] == 'zeusmp' or benchmark[i] == '434':
             print '--> zeusmp'
             process = Mybench.zeusmp
-        elif benchmark[i] == 'gromacs':
+        elif benchmark[i] == 'gromacs' or benchmark[i] == '435':
             print 'CPU ' + `i` +  '--> gromacs'
             process = Mybench.gromacs
-        elif benchmark[i] == 'cactusADM':
+        elif benchmark[i] == 'cactusADM' or benchmark[i] == '436':
             print 'CPU ' + `i` +  '--> cactusADM'
             process = Mybench.cactusADM
-        elif benchmark[i] == 'leslie3d':
+        elif benchmark[i] == 'leslie3d' or benchmark[i] == '437':
             print 'CPU ' + `i` +  '--> leslie3d'
             process = Mybench.leslie3d
-        elif benchmark[i] == 'namd':
+        elif benchmark[i] == 'namd' or benchmark[i] == '444':
             print 'CPU ' + `i` +  '--> namd'
             process = Mybench.namd
-        elif benchmark[i] == 'gobmk':
+        elif benchmark[i] == 'gobmk' or benchmark[i] == '445':
             print 'CPU ' + `i` +  '--> gobmk'
             process = Mybench.gobmk
-        elif benchmark[i] == 'dealII':
+        elif benchmark[i] == 'dealII' or benchmark[i] == '447':
             print 'CPU ' + `i` +  '--> dealII'
             process = Mybench.dealII
-        elif benchmark[i] == 'soplex':
+        elif benchmark[i] == 'soplex' or benchmark[i] == '450':
             print 'CPU ' + `i` +  '--> soplex'
             process = Mybench.soplex
-        elif benchmark[i] == 'povray':
+        elif benchmark[i] == 'povray' or benchmark[i] == '453':
             print 'CPU ' + `i` +  '--> povray'
             process = Mybench.povray
-        elif benchmark[i] == 'calculix':
+        elif benchmark[i] == 'calculix' or benchmark[i] == '454':
             print 'CPU ' + `i` +  '--> calculix'
             process = Mybench.calculix
-        elif benchmark[i] == 'hmmer':
+        elif benchmark[i] == 'hmmer' or benchmark[i] == '456':
             print 'CPU ' + `i` +  '--> hmmer'
             process = Mybench.hmmer
-        elif benchmark[i] == 'sjeng':
+        elif benchmark[i] == 'sjeng' or benchmark[i] == '458':
             print 'CPU ' + `i` +  '--> sjeng'
             process = Mybench.sjeng
-        elif benchmark[i] == 'GemsFDTD':
+        elif benchmark[i] == 'GemsFDTD' or benchmark[i] == '459':
             print 'CPU ' + `i` +  '--> GemsFDTD'
             process = Mybench.GemsFDTD
-        elif benchmark[i] == 'libquantum':
+        elif benchmark[i] == 'libquantum' or benchmark[i] == '462':
             print 'CPU ' + `i` +  '--> libquantum'
             process = Mybench.libquantum
-        elif benchmark[i] == 'h264ref':
+        elif benchmark[i] == 'h264ref' or benchmark[i] == '464':
             print 'CPU ' + `i` +  '--> h264ref'
             process = Mybench.h264ref
-        elif benchmark[i] == 'tonto':
+        elif benchmark[i] == 'tonto' or benchmark[i] == '465':
             print 'CPU ' + `i` +  '--> tonto'
             process = Mybench.tonto
-        elif benchmark[i] == 'lbm':
+        elif benchmark[i] == 'lbm' or benchmark[i] == '470':
             print 'CPU ' + `i` +  '--> lbm'
             process = Mybench.lbm
-        elif benchmark[i] == 'omnetpp':
+        elif benchmark[i] == 'omnetpp' or benchmark[i] == '471':
             print 'CPU ' + `i` +  '--> omnetpp'
             process = Mybench.omnetpp
-        elif benchmark[i] == 'astar':
+        elif benchmark[i] == 'astar' or benchmark[i] == '473':
             print 'CPU ' + `i` +  '--> astar'
             process = Mybench.astar
-        elif benchmark[i] == 'wrf':
+        elif benchmark[i] == 'wrf' or benchmark[i] == '481':
             print 'CPU ' + `i` +  '--> wrf'
             process = Mybench.wrf
-        elif benchmark[i] == 'sphinx3':
+        elif benchmark[i] == 'sphinx3' or benchmark[i] == '482':
             print 'CPU ' + `i` +  '--> sphinx3'
             process = Mybench.sphinx3
-        elif benchmark[i] == 'xalancbmk':
+        elif benchmark[i] == 'xalancbmk' or benchmark[i] == '483':
             print 'CPU ' + `i` +  '--> xalancbmk'
             process = Mybench.xalancbmk
-        elif benchmark[i] == 'specrand_i':
+        elif benchmark[i] == 'specrand_i' or benchmark[i] == '999_i':
             print 'CPU ' + `i` +  '--> specrand_i'
             process = Mybench.specrand_i
-        elif benchmark[i] == 'specrand_f':
+        elif benchmark[i] == 'specrand_f' or benchmark[i] == '999_f':
             print 'CPU ' + `i` +  '--> specrand_f'
             process = Mybench.specrand_f
 
