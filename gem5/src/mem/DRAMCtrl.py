@@ -330,7 +330,8 @@ class DDR3_1600_x64(DRAMCtrl):
     devices_per_rank = 8
 
     # Use two ranks
-    ranks_per_channel = 2
+    # ADARSH single rank device size 2Gbit => 4GB total size per channel
+    ranks_per_channel = 1
 
     # DDR3 has 8 banks in all configurations
     banks_per_rank = 8

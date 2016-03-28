@@ -101,7 +101,7 @@ envs['LD_LIBRARY_PATH']= hsa+'/gcc44/gmp-4.1-build/lib:'+hsa+'/gcc44/mpfr-2.3.2-
 envs['NVIDIA_CUDA_SDK_LOCATION'] = hsa+'/NVIDIA_GPU_Computing_SDK/C'
 
 # form command to be executed
-command = '''build/X86_VI_hammer_GPU/gem5.opt -r --stdout-file=stdout -e --stderr-file=stderr --outdir '''
+command = '''build/X86_VI_hammer_GPU/gem5.opt -r -e --outdir '''
 
 import argparse
 parser = argparse.ArgumentParser(description='Run specified workloads parallely')

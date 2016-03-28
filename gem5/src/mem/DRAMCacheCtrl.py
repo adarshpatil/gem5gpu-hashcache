@@ -106,7 +106,9 @@ class DDR3_1600_x64_Cache(DRAMCacheCtrl):
 class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     # size of device
     # two banks per device with each bank 4MB [2]
-    device_size = '8MB'
+    # ADARSH changed to 4 banks per device with each bank 4MB 
+    #device_size = '8MB'
+    device_size = '16MB'
     
     # 1x32 configuration, 1 device with 32 TSVs [2]
     device_bus_width = 32
@@ -115,18 +117,27 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     burst_length = 8
 
     # Each device has a page (row buffer) size of 256 bytes [2]
-    device_rowbuffer_size = '256B'
+    # ADARSH changed to 2kB
+    #device_rowbuffer_size = '256B'
+    device_rowbuffer_size = '2kB'
 
     # 1x32 configuration, so 1 device [2]
     devices_per_rank = 1
 
     # 4 layers so 4 ranks [2]
-    ranks_per_channel = 4
+    #ranks_per_channel = 4
+
+    # ADARSH 8 layers so 8 ranks
+    ranks_per_channel = 8
 
     # HMC has 2 banks per layer [2]
     # Each layer represents a rank. With 4 layers and 8 banks in total, each
     # layer has 2 banks; thus 2 banks per rank.
-    banks_per_rank = 2
+    #banks_per_rank = 2
+
+    # ADARSH 4 banks per layer
+    # Each layer represents a rank. With 8 layers and 32 banks in total
+    banks_per_rank = 4
 
     # 1250 MHz [2]
     tCK = '0.8ns'

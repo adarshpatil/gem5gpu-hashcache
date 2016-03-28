@@ -685,14 +685,17 @@ def run(options, root, testsys, cpu_class):
         if options.fast_forward:
             m5.stats.reset()
         print "**** REAL SIMULATION ****"
+        flag = 1
         if options.maxinsts:
             numProcessorsCompleted = 0
-            while numProcessorsCompleted < options.num_cpus:
+            while numProcessorsCompleted < options.num_cpus and flag==1:
                 startTick = m5.curTick()
                 while startTick == m5.curTick():
                     exit_event = m5.simulate(maxtick)
                     exit_cause = exit_event.getCause()
                     print exit_cause
+                    if exit_event.getCause() == "user interrupt received":
+                        flag = 0
                     if exit_event.getCause() != "a thread reached the max instruction count":
                         break
                     numProcessorsCompleted += 1

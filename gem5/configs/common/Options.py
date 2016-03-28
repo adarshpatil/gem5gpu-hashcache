@@ -235,7 +235,7 @@ def addCommonOptions(parser):
     # DRAM cache options
     parser.add_option("--dramcache", action="store_true", default=False,
                       help="add DRAMCache to memory hierarchy true/false")
-    parser.add_option("--dramcache_size", type="string", default="512MB")
+    parser.add_option("--dramcache_size", type="string", default="128MB")
     parser.add_option("--dramcache_assoc", type="int", default=1)
     parser.add_option("--dramcache_block_size", type="int", default=128)
     parser.add_option("--dramcache-type", default="HMC_2500_x32_Cache",
