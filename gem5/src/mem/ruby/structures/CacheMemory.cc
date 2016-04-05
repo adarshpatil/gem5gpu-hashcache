@@ -471,6 +471,21 @@ CacheMemory::regStats()
         .desc("Number of cache demand misses")
         ;
 
+    m_demand_read_misses
+            .name(name() + ".demand_read_misses")
+            .desc("Number of cache demand misses")
+            ;
+
+    m_demand_write_misses
+            .name(name() + ".demand_write_misses")
+            .desc("Number of cache demand misses")
+            ;
+
+    m_replacement_writes
+            .name(name() + ".replacement_writes")
+            .desc("Number of cache replacements that cause writes")
+            ;
+
     m_demand_accesses
         .name(name() + ".demand_accesses")
         .desc("Number of cache demand accesses")

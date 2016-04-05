@@ -595,6 +595,7 @@ machine(Directory, "AMD Hammer-like protocol")
       set_tbe(TBEs[address]);
       tbe.PhysicalAddress := address;
       tbe.ResponseType := CoherenceResponseType:NULL;
+      tbe.DmaRequestor := in_msg.Requestor;
     }
   }
 
@@ -872,12 +873,14 @@ machine(Directory, "AMD Hammer-like protocol")
 
   action(qf_queueMemoryFetchRequest, "qf", desc="Queue off-chip fetch request") {
     peek(requestQueue_in, RequestMsg) {
+      DPRINTF(RubySlicc, "ADARSH qf Requestor %s\n", in_msg.Requestor);
       queueMemoryRead(in_msg.Requestor, address, to_memory_controller_latency);
     }
   }
 
   action(qd_queueMemoryRequestFromDmaRead, "qd", desc="Queue off-chip fetch request") {
     peek(dmaRequestQueue_in, DMARequestMsg) {
+      DPRINTF(RubySlicc, "ADARSH qd Requestor %s\n", in_msg.Requestor);
       queueMemoryRead(in_msg.Requestor, address, to_memory_controller_latency);
     }
   }
@@ -1239,6 +1242,7 @@ machine(Directory, "AMD Hammer-like protocol")
 
   action(l_queueMemoryWBRequest, "lq", desc="Write PUTX data to memory") {
     peek(unblockNetwork_in, ResponseMsg) {
+      DPRINTF(RubySlicc, "ADARSH lq Sender %s , addr %s\n", in_msg.Sender, address);
       queueMemoryWrite(in_msg.Sender, address, to_memory_controller_latency,
                        in_msg.DataBlk);
     }
@@ -1250,6 +1254,7 @@ machine(Directory, "AMD Hammer-like protocol")
     // subset of block. However, this code matches the previous implementation
     // If we remove --access-backing-store from this protocol, this is a
     // potential bug.
+    DPRINTF(RubySlicc, "ADARSH ld DmaRequestor %s\n", tbe.DmaRequestor);
     queueMemoryWritePartial(tbe.DmaRequestor, address,
                             to_memory_controller_latency, tbe.DmaDataBlk,
                             tbe.Len);
@@ -1257,7 +1262,8 @@ machine(Directory, "AMD Hammer-like protocol")
 
   action(ly_queueMemoryWriteFromTBE, "ly", desc="Write data to memory from TBE") {
     assert(is_valid(tbe));
-    queueMemoryWrite(machineID, address, to_memory_controller_latency,
+    DPRINTF(RubySlicc, "ADARSH ly machineID %s\n", tbe.DmaRequestor);
+    queueMemoryWrite(tbe.DmaRequestor, address, to_memory_controller_latency,
                      tbe.DataBlk);
   }
 

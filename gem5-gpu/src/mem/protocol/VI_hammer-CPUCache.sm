@@ -552,6 +552,10 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
 
   // ACTIONS
 
+  action(d_incReplacement_writes, 'drw', desc="increment replacement writes"){
+    ++L2cache.replacement_writes;
+  }
+
   action(a_issueGETS, "a", desc="Issue GETS") {
     enqueue(requestNetwork_out, RequestMsg, issue_latency) {
       assert(is_valid(tbe));
@@ -1275,6 +1279,16 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
       ++L2cache.demand_misses;
   }
 
+  action(uu_profileL2ReadMiss, "\urm", desc="Profile the demand read miss") {
+	  ++L2cache.demand_misses;
+      ++L2cache.demand_read_misses;
+  }
+
+  action(uu_profileL2WriteMiss, "\uwm", desc="Profile the demand write miss") {
+	  ++L2cache.demand_misses;
+      ++L2cache.demand_write_misses;
+  }
+
   action(uu_profileL2Hit, "\uh", desc="Profile the demand hits ") {
       ++L2cache.demand_hits;
   }
@@ -1477,7 +1491,7 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
     i_allocateTBE;
     a_issueGETS;
     uu_profileL1DataMiss;
-    uu_profileL2Miss;
+    uu_profileL2ReadMiss;
     k_popMandatoryQueue;
   }
 
@@ -1486,7 +1500,7 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
     i_allocateTBE;
     a_issueGETS;
     uu_profileL1InstMiss;
-    uu_profileL2Miss;
+    uu_profileL2ReadMiss;
     k_popMandatoryQueue;
   }
 
@@ -1495,7 +1509,7 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
     i_allocateTBE;
     b_issueGETX;
     uu_profileL1DataMiss;
-    uu_profileL2Miss;
+    uu_profileL2WriteMiss;
     k_popMandatoryQueue;
   }
 
@@ -1548,7 +1562,7 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
     i_allocateTBE;
     b_issueGETX;
     uu_profileL1DataMiss;
-    uu_profileL2Miss;
+    uu_profileL2WriteMiss;
     k_popMandatoryQueue;
   }
 
@@ -1611,7 +1625,7 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
     b_issueGETX;
     p_decrementNumberOfMessagesByOne;
     uu_profileL1DataMiss;
-    uu_profileL2Miss;
+    uu_profileL2WriteMiss;
     k_popMandatoryQueue;
   }
 
@@ -1626,6 +1640,7 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
 
   transition(O, L2_Replacement, OI) {
     i_allocateTBE;
+    d_incReplacement_writes;
     d_issuePUT;
     forward_eviction_to_cpu;
     rr_deallocateL2CacheBlock;
@@ -1708,6 +1723,7 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
 
   transition(MM, L2_Replacement, MI) {
     i_allocateTBE;
+    d_incReplacement_writes;
     d_issuePUT;
     forward_eviction_to_cpu;
     rr_deallocateL2CacheBlock;
@@ -1774,6 +1790,7 @@ machine({L1Cache, L2Cache}, "AMD Hammer-like protocol")
 
   transition(M, L2_Replacement, MI) {
     i_allocateTBE;
+    d_incReplacement_writes;
     d_issuePUT;
     forward_eviction_to_cpu;
     rr_deallocateL2CacheBlock;

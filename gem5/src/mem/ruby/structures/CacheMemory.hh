@@ -129,7 +129,10 @@ class CacheMemory : public SimObject
   public:
     Stats::Scalar m_demand_hits;
     Stats::Scalar m_demand_misses;
+    Stats::Scalar m_demand_read_misses;
+    Stats::Scalar m_demand_write_misses;
     Stats::Formula m_demand_accesses;
+    Stats::Scalar m_replacement_writes;
 
     Stats::Scalar m_sw_prefetches;
     Stats::Scalar m_hw_prefetches;

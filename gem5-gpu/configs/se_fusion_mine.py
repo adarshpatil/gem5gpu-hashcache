@@ -296,6 +296,9 @@ for (i, cpu) in enumerate(system.cpu):
         elif benchmark[i] == 'heartwall':
             print 'CPU ' + `i` +  '--> heartwall'
             process = Mybench.heartwall
+        elif benchmark[i] == 'nn':
+            print 'CPU ' + `i` +  '--> nn'
+            process = Mybench.nn
         else:
             print "No recognized benchmark selected! Exiting."
             sys.exit(1)

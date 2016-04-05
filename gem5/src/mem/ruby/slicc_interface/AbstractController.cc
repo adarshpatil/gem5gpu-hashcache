@@ -214,12 +214,12 @@ AbstractController::queueMemoryRead(const MachineID &id, Addr addr,
 {
     RequestPtr req = new Request(addr, RubySystem::getBlockSizeBytes(), 0,
                                  m_masterId);
-    if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
+    if (id.getType() == MachineType_L1Cache)
+        req->setContextId(0);
+    else if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
         req->setContextId(31);
-	else
-		req->setContextId(0);
 
-    DPRINTF(RubyQueue,"ADARSH queueMemoryRead MachineID num: %d type: %d masterId: %d\n", id.getNum(), id.getType(), m_masterId);
+    DPRINTF(RubyQueue,"ADARSH queueMemoryRead MachineID num: %d type: %d masterId: %d  last: \n", id.getNum(), id.getType(), m_masterId, MachineIDToString(id));
     PacketPtr pkt = Packet::createRead(req);
     uint8_t *newData = new uint8_t[RubySystem::getBlockSizeBytes()];
     pkt->dataDynamic(newData);
@@ -243,10 +243,10 @@ AbstractController::queueMemoryWrite(const MachineID &id, Addr addr,
 {
     RequestPtr req = new Request(addr, RubySystem::getBlockSizeBytes(), 0,
                                  m_masterId);
-    if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
-        req->setContextId(31);
-    else
+    if (id.getType() == MachineType_L1Cache)
         req->setContextId(0);
+    else if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
+        req->setContextId(31);
 
     DPRINTF(RubyQueue,"ADARSH queueMemoryWrite MachineID num: %d type: %d masterId: %d\n", id.getNum(), id.getType(), m_masterId);
     PacketPtr pkt = Packet::createWrite(req);
@@ -276,10 +276,10 @@ AbstractController::queueMemoryWritePartial(const MachineID &id, Addr addr,
 {
     RequestPtr req = new Request(addr, RubySystem::getBlockSizeBytes(), 0,
                                  m_masterId);
-    if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
-        req->setContextId(31);
-    else
+    if (id.getType() == MachineType_L1Cache)
         req->setContextId(0);
+    else if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
+        req->setContextId(31);
 
     PacketPtr pkt = Packet::createWrite(req);
     uint8_t *newData = new uint8_t[size];

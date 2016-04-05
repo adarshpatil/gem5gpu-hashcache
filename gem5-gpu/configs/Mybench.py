@@ -289,12 +289,12 @@ gaussian.executable = binary_dir + 'gem5_fusion_gaussian'
 data = data_dir + 'gaussian/matrix1024.txt'
 gaussian.cmd = [gaussian.executable] + [data]
 
-# particlefilter_naive
+# particlefilter_naive - DOES NOT WORK JASON
 particlefilter_naive = LiveProcess()
 particlefilter_naive.executable = binary_dir + 'gem5_fusion_particlefilter_naive'
 particlefilter_naive.cmd = [particlefilter_naive.executable] + ['-x', '128', '-y', '128', '-z', '10', '-np', '1000']
 
-# particlefilter_float
+# particlefilter_float - DOES NOT WORK JASON
 particlefilter_float = LiveProcess()
 particlefilter_float.executable = binary_dir + 'gem5_fusion_particlefilter_float'
 particlefilter_float.cmd = [particlefilter_float.executable] + ['-x', '128', '-y', '128', '-z', '10', '-np', '1000']
@@ -304,4 +304,10 @@ heartwall = LiveProcess()
 heartwall.executable = binary_dir + 'gem5_fusion_heartwall'
 data = data_dir + 'test.avi'
 heartwall.cmd = [heartwall.executable] + [data] + ['10']
+
+# nn - needs fixing panic: Tried to read unmapped address 0.
+nn = LiveProcess()
+nn.executable = binary_dir + 'gem5_fusion_nn'
+data = data_dir + 'filelist4.txt'
+nn.cmd = [nn.executable] + [data] + ['-r', '5', '-lat', '30', '-lng', '90']
 

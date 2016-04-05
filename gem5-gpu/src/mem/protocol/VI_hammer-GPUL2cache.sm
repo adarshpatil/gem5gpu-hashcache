@@ -376,6 +376,7 @@ machine(GPUL2Cache, "Simple write back L2 cache")
       out_msg.MessageSize := MessageSizeType:Request_Control;
       out_msg.InitialRequestTime := curCycle();
       tbe.NumPendingMsgs := machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache); // One from each other cache (n-1) plus the memory (+1)
+      DPRINTF(RubySlicc, "ADARSH Issue GETS Requestor %s\n", out_msg.Requestor);
     }
   }
 
@@ -389,6 +390,7 @@ machine(GPUL2Cache, "Simple write back L2 cache")
       out_msg.MessageSize := MessageSizeType:Request_Control;
       out_msg.InitialRequestTime := curCycle();
       tbe.NumPendingMsgs := machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache); // One from each other cache (n-1) plus the memory (+1)
+      DPRINTF(RubySlicc, "ADARSH Issue GETX Requestor %s\n", out_msg.Requestor);
     }
   }
 
@@ -399,9 +401,12 @@ machine(GPUL2Cache, "Simple write back L2 cache")
       out_msg.Requestor := machineID;
       out_msg.Destination.add(map_Address_to_Directory(address));
       out_msg.MessageSize := MessageSizeType:Writeback_Control;
+      DPRINTF(RubySlicc, "ADARSH Issue PUT Requestor %s , addr %s\n", out_msg.Requestor, out_msg.addr);
     }
   }
-
+  action(d_incReplacement_writes, 'drw', desc="increment replacement writes"){
+	  ++L2cache.replacement_writes;
+  }
   action(ii_allocateL2CacheBlock, "\i", desc="Allocate a cache block") {
     if (is_valid(cache_entry)) {
     } else {
@@ -932,12 +937,14 @@ machine(GPUL2Cache, "Simple write back L2 cache")
     }
   }
 
-  action(uu_profileWriteMiss, "uu", desc="...") {
+  action(uu_profileWriteMiss, "uu", desc="Profile Write miss") {
     ++L2cache.demand_misses;
+    ++L2cache.demand_write_misses;
   }
 
-  action(vv_profileReadMiss, "vv", desc="...") {
+  action(vv_profileReadMiss, "vv", desc="Profile Read miss") {
     ++L2cache.demand_misses;
+    ++L2cache.demand_read_misses;
   }
 
   // TRANSITIONS
@@ -1031,6 +1038,7 @@ machine(GPUL2Cache, "Simple write back L2 cache")
 
   transition(O, Replacement, OI) {TagArrayRead} {
     i_allocateTBE;
+    d_incReplacement_writes;
     d_issuePUT;
     rr_deallocateL2CacheBlock;
     ka_wakeUpAllDependents;
@@ -1043,6 +1051,7 @@ machine(GPUL2Cache, "Simple write back L2 cache")
 
   transition({M,MM}, Replacement, MI) {TagArrayRead, DataArrayRead} {
     i_allocateTBE;
+    d_incReplacement_writes;
     d_issuePUT;
     rr_deallocateL2CacheBlock;
     ka_wakeUpAllDependents;
