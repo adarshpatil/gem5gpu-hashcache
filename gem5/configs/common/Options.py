@@ -266,6 +266,8 @@ def addSEOptions(parser):
                       help="Absolute path stdout redirection for the benchmark")
     parser.add_option("--benchmark_stderr", type="string", default="", 
                       help="Absolute path stderr redirection for the benchmark")
+    parser.add_option("--gpuapp_in_workload", action="store_true", default=False,
+                      help="use if workload has a gpu app [to set maxinsts]")
 
 
 def addFSOptions(parser):

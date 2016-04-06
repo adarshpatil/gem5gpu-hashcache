@@ -543,8 +543,11 @@ def run(options, root, testsys, cpu_class):
             # simulation period
             # donot set maxinsts for CPU running GPU code
             # assume GPU application is running on first core
-            if options.maxinsts and i != 0:
-                switch_cpus_1[i].max_insts_any_thread = options.maxinsts
+            if options.maxinsts:
+                if options.gpuapp_in_workload == True and i == 0:
+                    pass
+                else:
+                    switch_cpus_1[i].max_insts_any_thread = options.maxinsts
 
             # attach the checker cpu if selected
             if options.checker:
@@ -690,7 +693,7 @@ def run(options, root, testsys, cpu_class):
         flag = 1
         if options.maxinsts:
             numProcessorsCompleted = 0
-            while numProcessorsCompleted < (options.num_cpus -1) and flag==1:
+            while numProcessorsCompleted < (options.num_cpus if options.gpuapp_in_workload else (options.num_cpus-1)) and flag==1:
                 startTick = m5.curTick()
                 while startTick == m5.curTick():
                     exit_event = m5.simulate(maxtick)
