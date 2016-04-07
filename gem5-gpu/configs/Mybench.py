@@ -311,3 +311,13 @@ nn.executable = binary_dir + 'gem5_fusion_nn'
 data = data_dir + 'filelist4.txt'
 nn.cmd = [nn.executable] + [data] + ['-r', '5', '-lat', '30', '-lng', '90']
 
+# srad
+srad = LiveProcess()
+srad.executable = binary_dir + 'gem5_fusion_srad'
+srad.cmd = [srad.executable] + ['2048', '2048', '0', '127', '0', '127', '0.5', '2']
+
+# cfd
+cfd = LiveProcess()
+cfd.executable = binary_dir + 'gem5_fusion_euler3d'
+data = data_dir + 'missile.domn.0.2M'
+cfd.cmd = [cfd.executable] + [data]

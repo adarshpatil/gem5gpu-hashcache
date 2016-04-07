@@ -299,6 +299,12 @@ for (i, cpu) in enumerate(system.cpu):
         elif benchmark[i] == 'nn':
             print 'CPU ' + `i` +  '--> nn'
             process = Mybench.nn
+        elif benchmark[i] == 'srad':
+            print 'CPU ' + `i` +  '--> srad'
+            process = Mybench.srad
+        elif benchmark[i] == 'cfd':
+            print 'CPU ' + `i` +  '--> cfd'
+            process = Mybench.cfd
         else:
             print "No recognized benchmark selected! Exiting."
             sys.exit(1)
