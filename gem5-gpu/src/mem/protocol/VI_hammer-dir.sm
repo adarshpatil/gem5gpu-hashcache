@@ -1225,7 +1225,7 @@ machine(Directory, "AMD Hammer-like protocol")
   action(rs_removeSharer, "s", desc="remove current sharer") {
     if (full_bit_dir_enabled) {
       peek(unblockNetwork_in, ResponseMsg) {
-        assert(cache_entry.Sharers.isElement(in_msg.Sender));
+        //assert(cache_entry.Sharers.isElement(in_msg.Sender));
         cache_entry.Sharers.remove(in_msg.Sender);
       }
     }
