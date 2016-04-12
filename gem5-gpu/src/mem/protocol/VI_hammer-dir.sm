@@ -599,6 +599,19 @@ machine(Directory, "AMD Hammer-like protocol")
     }
   }
 
+  action(vp_allocatePFReplaceInTBE, "vp", desc="Record a probe filter replacement in TBE") {
+    assert(is_valid(cache_entry));
+    check_allocate(TBEs);
+    peek(requestQueue_in, RequestMsg) {
+      TBEs.allocate(address);
+      set_tbe(TBEs[address]);
+      tbe.PhysicalAddress := address;
+      tbe.DmaRequestor := cache_entry.Owner;
+      tbe.ResponseType := CoherenceResponseType:NULL;
+      tbe.CacheDirty := false;
+    }
+  }
+
   action(vd_allocateDmaRequestInTBE, "vd", desc="Record Data in TBE") {
     check_allocate(TBEs);
     peek(dmaRequestQueue_in, DMARequestMsg) {
@@ -1225,7 +1238,7 @@ machine(Directory, "AMD Hammer-like protocol")
   action(rs_removeSharer, "s", desc="remove current sharer") {
     if (full_bit_dir_enabled) {
       peek(unblockNetwork_in, ResponseMsg) {
-        //assert(cache_entry.Sharers.isElement(in_msg.Sender));
+        assert(cache_entry.Sharers.isElement(in_msg.Sender));
         cache_entry.Sharers.remove(in_msg.Sender);
       }
     }
@@ -1390,14 +1403,14 @@ machine(Directory, "AMD Hammer-like protocol")
   }
 
   transition(NO, Pf_Replacement, NO_R) {PfRead, PfWrite} {
-    v_allocateTBE;
+    vp_allocatePFReplaceInTBE;
     po_setPendingMsgsToOne;
     io_invalidateOwnerRequest;
     pfd_probeFilterDeallocate;
   }
 
   transition(NX, Pf_Replacement, NO_R) {PfRead, PfWrite} {
-    v_allocateTBE;
+    vp_allocatePFReplaceInTBE;
     pa_setPendingMsgsToAll;
     ia_invalidateAllRequest;
     pfd_probeFilterDeallocate;
