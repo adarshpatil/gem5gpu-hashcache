@@ -901,35 +901,29 @@ machine(Directory, "AMD Hammer-like protocol")
   action(fn_forwardRequestIfNecessary, "fn", desc="Forward requests if necessary") {
     assert(is_valid(tbe));
     if ((machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) > 1) && (tbe.Acks <= 1)) {
-      if (full_bit_dir_enabled) {
-        assert(is_valid(cache_entry));
-        peek(requestQueue_in, RequestMsg) {
+      peek(requestQueue_in, RequestMsg) {
+        if (full_bit_dir_enabled) {
+          assert(is_valid(cache_entry));
           fwd_set := cache_entry.Sharers;
-          fwd_set.remove(in_msg.Requestor);
-          if (fwd_set.count() > 0) {
-            enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
-              out_msg.addr := address;
-              out_msg.Type := in_msg.Type;
-              out_msg.Requestor := in_msg.Requestor;
-              out_msg.Destination := fwd_set;
-              out_msg.MessageSize := MessageSizeType:Multicast_Control;
-              out_msg.InitialRequestTime := in_msg.InitialRequestTime;
-              out_msg.ForwardRequestTime := curCycle();
-              assert(tbe.SilentAcks > 0);
-              out_msg.SilentAcks := tbe.SilentAcks;
-            }
-          }
+        } else {
+          fwd_set.clear();
+          fwd_set.broadcast(MachineType:L1Cache); // Send to all L1 caches
+          fwd_set.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
         }
-      } else {
-        peek(requestQueue_in, RequestMsg) {
+        fwd_set.remove(in_msg.Requestor);
+        if (!full_bit_dir_enabled || (fwd_set.count() > 0)) {
           enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
             out_msg.addr := address;
             out_msg.Type := in_msg.Type;
             out_msg.Requestor := in_msg.Requestor;
-            out_msg.Destination.broadcast(MachineType:L1Cache); // Send to all L1 caches
-            out_msg.Destination.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
-            out_msg.Destination.remove(in_msg.Requestor); // Don't include the original requestor
-            out_msg.MessageSize := MessageSizeType:Broadcast_Control;
+            out_msg.Destination := fwd_set;
+            if (full_bit_dir_enabled) {
+              out_msg.MessageSize := MessageSizeType:Multicast_Control;
+              assert(tbe.SilentAcks > 0);
+              out_msg.SilentAcks := tbe.SilentAcks;
+            } else {
+              out_msg.MessageSize := MessageSizeType:Broadcast_Control;
+            }
             out_msg.InitialRequestTime := in_msg.InitialRequestTime;
             out_msg.ForwardRequestTime := curCycle();
           }
@@ -939,26 +933,25 @@ machine(Directory, "AMD Hammer-like protocol")
   }
 
   action(ia_invalidateAllRequest, "ia", desc="invalidate all copies") {
-    if (machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) > 1) {
-      if (full_bit_dir_enabled) {
-        assert(cache_entry.Sharers.count() > 0);
+    // NOTE: If it is possible that there are no sharers when this is called,
+    // then the transition that calls this MUST also call o_checkForCompletion,
+    // or the directory will halt progress on this line (trigger deadlock).
+    if (cache_entry.Sharers.count() > 0) {
+      if (machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) > 1) {
         peek(requestQueue_in, RequestMsg) {
           enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
             out_msg.addr := address;
             out_msg.Type := CoherenceRequestType:INV;
             out_msg.Requestor := machineID;
-            out_msg.Destination := cache_entry.Sharers;
-            out_msg.MessageSize := MessageSizeType:Multicast_Control;
+            if (full_bit_dir_enabled) {
+              out_msg.Destination := cache_entry.Sharers;
+              out_msg.MessageSize := MessageSizeType:Multicast_Control;
+            } else {
+              out_msg.Destination.broadcast(MachineType:L1Cache); // Send to all L1 caches
+              out_msg.Destination.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
+              out_msg.MessageSize := MessageSizeType:Broadcast_Control;
+            }
           }
-        }
-      } else {
-        enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
-          out_msg.addr := address;
-          out_msg.Type := CoherenceRequestType:INV;
-          out_msg.Requestor := machineID;
-          out_msg.Destination.broadcast(MachineType:L1Cache); // Send to all L1 caches
-          out_msg.Destination.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
-          out_msg.MessageSize := MessageSizeType:Broadcast_Control;
         }
       }
     }
@@ -979,51 +972,51 @@ machine(Directory, "AMD Hammer-like protocol")
   }
 
   action(fb_forwardRequestBcast, "fb", desc="Forward requests to all nodes") {
-    if (machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) > 1) {
-      peek(requestQueue_in, RequestMsg) {
+    assert(!full_bit_dir_enabled || is_valid(cache_entry));
+    peek(requestQueue_in, RequestMsg) {
+      if ((machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) > 1) &&
+        (!full_bit_dir_enabled || (cache_entry.Sharers.count() > 1) || !cache_entry.Sharers.isElement(in_msg.Requestor))) {
         if (full_bit_dir_enabled) {
           fwd_set := cache_entry.Sharers;
-          fwd_set.remove(in_msg.Requestor);
-          if (fwd_set.count() > 0) {
-            enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
-                  out_msg.addr := address;
-                  out_msg.Type := in_msg.Type;
-                  out_msg.Requestor := in_msg.Requestor;
-                  out_msg.Destination := fwd_set;
-                  out_msg.MessageSize := MessageSizeType:Multicast_Control;
-                  out_msg.InitialRequestTime := in_msg.InitialRequestTime;
-                  out_msg.ForwardRequestTime := curCycle();
-                  out_msg.SilentAcks := machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) - fwd_set.count();
-                  out_msg.SilentAcks := out_msg.SilentAcks - 1;
-              }
-          }
         } else {
-            enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
-                out_msg.addr := address;
-                out_msg.Type := in_msg.Type;
-                out_msg.Requestor := in_msg.Requestor;
-                out_msg.Destination.broadcast(MachineType:L1Cache); // Send to all L1 caches
-                out_msg.Destination.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
-                out_msg.Destination.remove(in_msg.Requestor); // Don't include the original requestor
-                out_msg.MessageSize := MessageSizeType:Broadcast_Control;
-                out_msg.InitialRequestTime := in_msg.InitialRequestTime;
-                out_msg.ForwardRequestTime := curCycle();
-            }
+          fwd_set.clear();
+          fwd_set.broadcast(MachineType:L1Cache); // Send to all L1 caches
+          fwd_set.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
         }
-      }
-    } else {
-      peek(requestQueue_in, RequestMsg) {
-          enqueue(responseNetwork_out, ResponseMsg, 1) {
-            out_msg.addr := address;
-            out_msg.Type := CoherenceResponseType:ACK;
-            out_msg.Sender := machineID;
-            out_msg.Destination.add(in_msg.Requestor);
-            out_msg.Dirty := false; // By definition, the block is now clean
-            out_msg.Acks := 0;
-            out_msg.SilentAcks := 0;
-            DPRINTF(RubySlicc, "%d\n", out_msg.Acks);
-            out_msg.MessageSize := MessageSizeType:Response_Control;
+        fwd_set.remove(in_msg.Requestor);
+        enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
+          out_msg.addr := address;
+          out_msg.Type := in_msg.Type;
+          out_msg.Requestor := in_msg.Requestor;
+          out_msg.Destination := fwd_set;
+          if (full_bit_dir_enabled) {
+            out_msg.MessageSize := MessageSizeType:Multicast_Control;
+            out_msg.SilentAcks := machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) - fwd_set.count();
+            out_msg.SilentAcks := out_msg.SilentAcks - 1;
+          } else {
+            out_msg.MessageSize := MessageSizeType:Broadcast_Control;
           }
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := curCycle();
+        }
+      } else {
+        enqueue(responseNetwork_out, ResponseMsg, 1) {
+          out_msg.addr := address;
+          out_msg.Type := CoherenceResponseType:ACK;
+          out_msg.Sender := machineID;
+          out_msg.Destination.add(in_msg.Requestor);
+          out_msg.Dirty := false; // By definition, the block is now clean
+          out_msg.Acks := 0;
+          // When the number of total controllers is 1, then 0 silent acks
+          // need to be sent. When using the full_bit_dir_enabled, all other
+          // controllers send silent acks that they do not have copies. This
+          // calculation works for both cases:
+          out_msg.SilentAcks := machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) - 1;
+          DPRINTF(RubySlicc, "%d\n", out_msg.Acks);
+          out_msg.MessageSize := MessageSizeType:Response_Control;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+        }
       }
     }
   }
@@ -1054,33 +1047,24 @@ machine(Directory, "AMD Hammer-like protocol")
 
   action(fc_forwardRequestConditionalOwner, "fc", desc="Forward request to one or more nodes") {
     assert(machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) > 1);
-    if (probe_filter_enabled || full_bit_dir_enabled) {
-      peek(requestQueue_in, RequestMsg) {
-        enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
+    peek(requestQueue_in, RequestMsg) {
+      enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
+        out_msg.addr := address;
+        out_msg.Type := in_msg.Type;
+        out_msg.Requestor := in_msg.Requestor;
+        if (probe_filter_enabled || full_bit_dir_enabled) {
           assert(is_valid(cache_entry));
-          out_msg.addr := address;
-          out_msg.Type := in_msg.Type;
-          out_msg.Requestor := in_msg.Requestor;
           out_msg.Destination.add(cache_entry.Owner);
           out_msg.MessageSize := MessageSizeType:Request_Control;
           out_msg.DirectedProbe := true;
-          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
-          out_msg.ForwardRequestTime := curCycle();
-        }
-      }
-    } else {
-      peek(requestQueue_in, RequestMsg) {
-        enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
-          out_msg.addr := address;
-          out_msg.Type := in_msg.Type;
-          out_msg.Requestor := in_msg.Requestor;
+        } else {
           out_msg.Destination.broadcast(MachineType:L1Cache); // Send to all L1 caches
           out_msg.Destination.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
           out_msg.Destination.remove(in_msg.Requestor); // Don't include the original requestor
           out_msg.MessageSize := MessageSizeType:Broadcast_Control;
-          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
-          out_msg.ForwardRequestTime := curCycle();
         }
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := curCycle();
       }
     }
   }
@@ -1088,37 +1072,28 @@ machine(Directory, "AMD Hammer-like protocol")
   action(nofc_forwardRequestConditionalOwner, "nofc", desc="Forward request to one or more nodes if the requestor is not the owner") {
     if (machineCount(MachineType:L1Cache)+machineCount(MachineType:GPUL2Cache) > 1) {
 
-     if (probe_filter_enabled || full_bit_dir_enabled) {
-       peek(requestQueue_in, RequestMsg) {
-        if (in_msg.Requestor != cache_entry.Owner) {
+      peek(requestQueue_in, RequestMsg) {
+        if (!(probe_filter_enabled || full_bit_dir_enabled) || in_msg.Requestor != cache_entry.Owner) {
           enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
-            assert(is_valid(cache_entry));
             out_msg.addr := address;
             out_msg.Type := in_msg.Type;
             out_msg.Requestor := in_msg.Requestor;
-            out_msg.Destination.add(cache_entry.Owner);
-            out_msg.MessageSize := MessageSizeType:Request_Control;
-            out_msg.DirectedProbe := true;
+            if (probe_filter_enabled || full_bit_dir_enabled) {
+              assert(is_valid(cache_entry));
+              out_msg.Destination.add(cache_entry.Owner);
+              out_msg.MessageSize := MessageSizeType:Request_Control;
+              out_msg.DirectedProbe := true;
+            } else {
+              out_msg.Destination.broadcast(MachineType:L1Cache); // Send to all L1 caches
+              out_msg.Destination.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
+              out_msg.Destination.remove(in_msg.Requestor); // Don't include the original requestor
+              out_msg.MessageSize := MessageSizeType:Broadcast_Control;
+            }
             out_msg.InitialRequestTime := in_msg.InitialRequestTime;
             out_msg.ForwardRequestTime := curCycle();
           }
         }
-       }
-     } else {
-      peek(requestQueue_in, RequestMsg) {
-        enqueue(forwardNetwork_out, RequestMsg, from_memory_controller_latency) {
-          out_msg.addr := address;
-          out_msg.Type := in_msg.Type;
-          out_msg.Requestor := in_msg.Requestor;
-          out_msg.Destination.broadcast(MachineType:L1Cache); // Send to all L1 caches
-          out_msg.Destination.broadcast(MachineType:GPUL2Cache); // Send to all L2 caches
-          out_msg.Destination.remove(in_msg.Requestor); // Don't include the original requestor
-          out_msg.MessageSize := MessageSizeType:Broadcast_Control;
-          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
-          out_msg.ForwardRequestTime := curCycle();
-        }
       }
-     }
     }
   }
 
@@ -1392,6 +1367,7 @@ machine(Directory, "AMD Hammer-like protocol")
     v_allocateTBE;
     pa_setPendingMsgsToAll;
     ia_invalidateAllRequest;
+    o_checkForCompletion;
     pfd_probeFilterDeallocate;
   }
 
@@ -1399,6 +1375,7 @@ machine(Directory, "AMD Hammer-like protocol")
     v_allocateTBE;
     pa_setPendingMsgsToAll;
     ia_invalidateAllRequest;
+    o_checkForCompletion;
     pfd_probeFilterDeallocate;
   }
 
@@ -1413,6 +1390,7 @@ machine(Directory, "AMD Hammer-like protocol")
     vp_allocatePFReplaceInTBE;
     pa_setPendingMsgsToAll;
     ia_invalidateAllRequest;
+   o_checkForCompletion;
     pfd_probeFilterDeallocate;
   }
 
