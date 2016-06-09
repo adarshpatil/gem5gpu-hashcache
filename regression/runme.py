@@ -33,62 +33,122 @@ def worker():
         
 
 ## __MAIN__ ##
+
+import argparse
+parser = argparse.ArgumentParser(description='Run specified workloads parallely')
+
+parser.add_argument('--run_mix', default="",
+                   help='the list of workload mix to run separated by ;')
+parser.add_argument('--threads', default=1,
+                   help='number of simulations to run in parallel')
+parser.add_argument('--memory', default="",
+                    help='total system memory format: xG; specify only x')
+parser.add_argument('--dramcache', action='store_true', default=False,
+                    help='flag to run with predefined dramcache, default false')
+parser.add_argument('--run', action='store_true', default=False,
+                    help='flag to run, else default to checkpoint')
+
+args = parser.parse_args()
+num_threads=int(args.threads)
+run_mix = args.run_mix.split(';')
+
+
 hsa = '/storage/adarsh/hsa'
 main_prefix = hsa + '/gem5gpu'
 
-num_threads = 8
  
 benchmarks = {
-        # CPU - GPU workload mix
-        '4cg_mix1' : 'milc;mcf;omnetpp;gcc;bfs',
-        '4cg_mix2' : 'GemsFDTD;leslie3d;xalancbmk;soplex;lud',
-        '4cg_mix3' : 'cactusADM;libquantum;tonto;sphinx3;particlefilter_naive',
-        '4cg_mix4' : 'lbm;bwaves;zeusmp;mcf;kmeans',
-        '4cg_mix5' : 'soplex;bzip2;gobmk;hmmer;gaussian',
-        '4cg_mix6' : 'milc;GemsFDTD;cactusADM;lbm;backprop',
-        '4cg_mix7' : 'mcf;omnetpp;soplex;leslie3d;streamcluster',
-        '4cg_mix8' : 'bwaves;gobmk;zeusmp;gcc;needle',
-        '4cg_mix9' : 'gcc;milc;astar;leslie3d;hotspot',
-        '4cg_mix10': 'astar;bzip2;sphinx3;xalancbmk;heartwall',
+        # 4core
+        '4g1' : 'bfs;soplex;bzip2;gobmk;hmmer',
+        '4g2' : 'needle;cactusADM;gcc;bzip2;sphinx3',
+        '4g3' : 'gaussian;mcf;libquantum;gobmk;sphinx3',
+        '4g4' : 'hotspot;astar;milc;gcc;leslie3d',
+        '4g5' : 'bfs;astar;milc;gobmk;bwaves',
+        '4g6' : 'backprop;astar;cactusADM;libquantum;sphinx3',
+        '4g7' : 'streamcluster;astar;mcf;gobmk;sphinx3',
+        '4g8' : 'needle;astar;mcf;gcc;bzip2',
+        '4g9' : 'lud;soplex;milc;mcf;bwaves',
+        '4g10': 'kmeans;astar;soplex;cactusADM;libquantum',
+        '4g11': 'bfs;astar;soplex;mcf;gcc',
+        '4g12': 'kmeans;milc;mcf;libquantum;bzip2',
+        '4g13': 'heartwall;astar;milc;soplex;cactusADM',
+        '4g14': 'gaussian;astar;mcf;soplex;cactusADM',
 
-        # Only CPU workloads mixes
-        '4c_mix1' : 'milc;mcf;omnetpp;gcc',
-        '4c_mix2' : 'GemsFDTD;leslie3d;xalancbmk;soplex',
-        '4c_mix3' : 'cactusADM;libquantum;tonto;sphinx3',
-        '4c_mix4' : 'lbm;bwaves;zeusmp;mcf',
-        '4c_mix5' : 'soplex;bzip2;gobmk;hmmer',
-        '4c_mix6' : 'milc;GemsFDTD;cactusADM;lbm',
-        '4c_mix7' : 'mcf;omnetpp;soplex;leslie3d',
-        '4c_mix8' : 'bwaves;gobmk;zeusmp;gcc',
-        '4c_mix9' : 'gcc;milc;astar;leslie3d',
-        '4c_mix10': 'astar;bzip2;sphinx3;xalancbmk',
-        'n1' : '462;459;470;433',
-        'n2' : '429;462;471;473',
-        'n3' : '410;473;445;433',
-        'n4' : '462;459;445;410',
-        'n5' : '429;456;450;459',
-        'n6' : '403;445;459;462',
-        'n7' : '403;433;470;410'
+        # 8core
+        '8g1' : 'hotspot;milc;mcf;bzip2;gcc;gobmk;libquantum;hmmer;sphinx3',
+        '8g2' : 'backprop;soplex;cactusADM;libquantum;bzip2;gobmk;leslie3d;hmmer;sphinx3',
+        '8g3' : 'streamcluster;astar;milc;mcf;bzip2;gcc;gobmk;libquantum;hmmer',
+        '8g4' : 'gaussian;cactusADM;soplex;mcf;bzip2;gcc;leslie3d;libquantum;sphinx3',
+        '8g5' : 'bfs;astar;milc;mcf;soplex;bzip2;gcc;hmmer;libquantum',
+        '8g6' : 'kmeans;astar;milc;soplex;cactusADM;bzip2;sphinx3;hmmer;leslie3d'
     }
 
+cpt_common_config = '''--work-begin-checkpoint-count=1
+--caches
+--clusters=8
+--flush_kernel_end
+--access-host-pagetable
+--sc_l1_size=64kB
+--sc_l1_assoc=4
+--sc_l2_size=512kB
+--sc_l2_assoc=16
+--gpu_tlb_entries=64
+--gpu_tlb_assoc=4
+--pwc_size=32kB
+--sys-clock=2.5GHz
+--cpu-clock=2.5GHz
+--l1d_size=32kB
+--l1d_assoc=8
+--l1i_size=32kB
+--l1i_assoc=8
+--l2_size=256kB
+--l2_assoc=8
+--mem-type=DDR3_1600_x64
+--dir-on
+--benchmark_stdout benchstdout
+--benchmark_stderr benchstderr'''
+
+run_common_config = '''--checkpoint-restore=1
+--restore-with-cpu=timing
+--standard-switch=1
+--warmup-insts=50000
+--maxinsts=500000000
+--caches
+--clusters=8
+--flush_kernel_end
+--access-host-pagetable
+--sc_l1_size=64kB
+--sc_l1_assoc=4
+--sc_l2_size=512kB
+--sc_l2_assoc=16
+--gpu_tlb_entries=64
+--gpu_tlb_assoc=4
+--pwc_size=32kB
+--sys-clock=2.5GHz
+--cpu-clock=2.5GHz
+--l1d_size=32kB
+--l1d_assoc=8
+--l1i_size=32kB
+--l1i_assoc=8
+--l2_size=256kB
+--l2_assoc=8
+--mem-type=DDR3_1600_x64
+--dir-on
+--benchmark_stdout benchstdout
+--benchmark_stderr benchstderr
+--gpuapp_in_workload'''
+
+'''
+DRAM CACHE PREDEFINED CONFIGURATION
+4G - 1 cntrl - 128M dram cache
+8G - 2 cntrl - 256M dram cache
+16G - 4 cntrl - 512M dram cache
+32G - 8 cntrl - 1G dram cache
+'''
+
 results_dir = main_prefix + '/results'
-suite_results_dir = results_dir + '/4core-8GB-2cntrl-noL3'
-suite_config = suite_results_dir + '/config' 
 
-# create results dir /results/suite_dir/benchmarks_dir/(files)
-if not os.path.exists(suite_results_dir):
-    os.makedirs(suite_results_dir)
 
-common_config_file = main_prefix + '/regression/4core-8G-common_config'
-
-suite_options = '''--l3_size=4096kB --l3_assoc=16 --num-dirs=2 '''
-
-# create run config from common and suite options and write to  config
-shutil.copyfile(common_config_file, suite_config)
-
-run_config_fp = open(suite_config,"a")
-run_config_fp.write(suite_options)
-run_config_fp.close()
 
 
 ## Setup environment variables
@@ -101,36 +161,67 @@ envs['LD_LIBRARY_PATH']= hsa+'/gcc44/gmp-4.1-build/lib:'+hsa+'/gcc44/mpfr-2.3.2-
 envs['NVIDIA_CUDA_SDK_LOCATION'] = hsa+'/NVIDIA_GPU_Computing_SDK/C'
 
 # form command to be executed
-command = '''build/X86_VI_hammer_GPU/gem5.opt -r -e --outdir '''
+command = main_prefix + '''/gem5/build/X86_VI_hammer_GPU/gem5.opt -r -e --outdir='''
 
-import argparse
-parser = argparse.ArgumentParser(description='Run specified workloads parallely')
-
-parser.add_argument('--run_mix', default="",
-                   help='the list of workload mix to run separated by ;')
-parser.add_argument('--threads', default=1,
-                   help='number of simulations to run in parallel')
-
-args = parser.parse_args()
-num_threads=int(args.threads)
-run_mix = args.run_mix.split(';')
+cpt_run_suffix = ''
+final_config = ''
 
 for benchmark in run_mix:
     print ("Got benchmark " + benchmark)
-    if not os.path.exists(suite_results_dir+'/'+benchmark):
-        os.makedirs(suite_results_dir+'/'+benchmark)
+    if benchmark[0] == '4':
+        num_cores = 5
     else:
-        if os.path.exists(suite_results_dir+'/'+benchmark+'.bkup'):
-            shutil.rmtree(suite_results_dir+'/'+benchmark+'.bkup')
-        shutil.move(suite_results_dir+'/'+benchmark, suite_results_dir+'/'+benchmark+'.bkup')
-        os.makedirs(suite_results_dir+'/'+benchmark)
-    
-    run_command = command + suite_results_dir + '/' + benchmark + ' ' + main_prefix +'/gem5-gpu/configs/se_fusion_mine.py `cat '+ \
-                suite_config+'`  --benchmark "'+ benchmarks[benchmark] + '"' + \
-                ' --benchmark_stdout ' + suite_results_dir + '/' + benchmark + '/bench-stdout' + \
-                ' --benchmark_stderr ' + suite_results_dir + '/' + benchmark + '/bench-stderr'
+        num_cores = 9
+
+    if args.dramcache and int(args.memory) == '8':
+        suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-256ML3'
+    if args.dramcache and int(args.memory) == '16':
+        suite_results_dir = results_dir + '/' + benchmark[0] + 'core-16G-512ML3'
+    else:
+        suite_results_dir = results_dir + '/4core-' + args.memory + 'G-noL3'
+
+    # create results dir /results/suite_dir/benchmarks_dir/(files)
+    if not os.path.exists(suite_results_dir):
+        os.makedirs(suite_results_dir)
+
+    if args.run:
+        cpt_run_suffix = '.run'
+        final_config = run_common_config + '\n--checkpoint-dir=' + suite_results_dir + '/'+ benchmark + '.cpt'
+    else:
+        cpt_run_suffix = '.cpt'
+        final_config = cpt_common_config
+
+
+    if not os.path.exists(suite_results_dir+'/'+benchmark + cpt_run_suffix):
+        os.makedirs(suite_results_dir+'/'+benchmark + cpt_run_suffix)
+    else:
+        if os.path.exists(suite_results_dir+'/'+benchmark + cpt_run_suffix +'.bkup'):
+            shutil.rmtree(suite_results_dir+'/'+benchmark + cpt_run_suffix +'.bkup')
+        shutil.move(suite_results_dir+'/'+benchmark + cpt_run_suffix, suite_results_dir+'/'+benchmark + cpt_run_suffix +'.bkup')
+        os.makedirs(suite_results_dir+'/'+benchmark + cpt_run_suffix)
+
+    if args.memory == '8':
+        final_config = final_config + '\n--total-mem-size=8GB\n--num-dirs=2'
+
+    if args.memory == '16':
+        final_config = final_config + '\n--total-mem-size=16GB\n--num-dirs=4'
+
+    if args.dramcache:
+        final_config = final_config + '\n--dramcache'
+
+    final_config = final_config + '\n--num-cpus=' + str(num_cores)
+    final_config = final_config + '\n' + '--benchmark ' + benchmarks[benchmark]
+
+    config_file_fp = open(suite_results_dir+'/'+benchmark+cpt_run_suffix+'/myconfig', "a")
+    config_file_fp.write(final_config)
+    config_file_fp.close()
+
+    run_command = command + suite_results_dir + '/' + benchmark + cpt_run_suffix + \
+                ' ' + main_prefix +'/gem5-gpu/configs/se_fusion_mine.py `cat '+ \
+                suite_results_dir+'/'+benchmark+cpt_run_suffix+'/myconfig' + '`'
+
     sims.put(run_command)
-    
+
 print ("intial queue size " + str(sims.qsize()))
 threads = [ threading.Thread(target=worker) for _i in range(num_threads) ]
 for thread in threads:
