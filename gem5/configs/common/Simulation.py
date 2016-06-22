@@ -45,6 +45,7 @@ from os.path import join as joinpath
 
 import CpuConfig
 import MemConfig
+import datetime
 
 import m5
 from m5.defines import buildEnv
@@ -705,6 +706,7 @@ def run(options, root, testsys, cpu_class):
                         break
                     numProcessorsCompleted += 1
                     print 'Cores completed = %d' %(numProcessorsCompleted,)
+                    print datetime.datetime.now().strftime("%b %e %Y %X")
                     m5.stats.dump()
 
         # If checkpoints are being taken, then the checkpoint instruction

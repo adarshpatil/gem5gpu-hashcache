@@ -44,6 +44,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+//ADARSH
+#include <time.h>
 
 #include "base/cprintf.hh"
 #include "base/hostinfo.hh"
@@ -82,6 +84,8 @@ __exit_epilogue(int code,
                 const char *func, const char *file, int line,
                 const char *format)
 {
+	time_t exit_time;
+
     newline_if_needed(std::cerr, format);
 
     ccprintf(std::cerr,
@@ -89,6 +93,10 @@ __exit_epilogue(int code,
              "[%s:%s, line %d]\n"
              "Memory Usage: %ld KBytes\n",
              curTick(), func, file, line, memUsage());
+
+    //ADARSH
+    time(&exit_time);
+    ccprintf(std::cerr,"Exited at: %s", ctime(&exit_time));
 
     if (code < 0)
         abort();
