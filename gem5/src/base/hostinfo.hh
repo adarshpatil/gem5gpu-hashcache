@@ -47,5 +47,6 @@ uint64_t procInfo(const char *filename, const char *target);
  * @return virtual memory usage in kilobytes
  */
 uint64_t memUsage();
+uint64_t resMem();
 
 #endif // __HOSTINFO_HH__

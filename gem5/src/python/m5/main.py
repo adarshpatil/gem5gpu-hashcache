@@ -293,6 +293,8 @@ def main(*args):
             datetime.datetime.now().strftime("%b %e %Y %X")
         print "gem5 executing on %s" % socket.gethostname()
 
+        # ADARSH
+        print "gem5 process id %s" % os.getpid()
         # in Python 3 pipes.quote() is moved to shlex.quote()
         import pipes
         print "command line:", " ".join(map(pipes.quote, sys.argv))

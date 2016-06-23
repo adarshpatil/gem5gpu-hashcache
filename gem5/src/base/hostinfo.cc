@@ -118,3 +118,10 @@ memUsage()
     return procInfo("/proc/self/status", "VmSize:");
 #endif
 }
+
+uint64_t
+resMem()
+{
+    // Linux implementation
+    return procInfo("/proc/self/status", "VmRSS:");
+}

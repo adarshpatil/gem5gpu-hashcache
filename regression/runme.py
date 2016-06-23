@@ -64,7 +64,7 @@ benchmarks = {
         '4g3' : 'gaussian;mcf;libquantum;gobmk;sphinx3',
         '4g4' : 'hotspot;astar;milc;gcc;leslie3d',
         '4g5' : 'bfs;astar;milc;gobmk;bwaves',
-        '4g6' : 'backprop;astar;cactusADM;libquantum;sphinx3',
+        '4g6' : 'srad;astar;cactusADM;libquantum;sphinx3',
         '4g7' : 'streamcluster;astar;mcf;gobmk;sphinx3',
         '4g8' : 'needle;astar;mcf;gcc;bzip2',
         '4g9' : 'lud;soplex;milc;mcf;bwaves',

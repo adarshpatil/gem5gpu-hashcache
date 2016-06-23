@@ -91,8 +91,9 @@ __exit_epilogue(int code,
     ccprintf(std::cerr,
              " @ tick %d\n"
              "[%s:%s, line %d]\n"
-             "Memory Usage: %ld KBytes\n",
-             curTick(), func, file, line, memUsage());
+             "Memory Usage: %ld KBytes\n"
+             "Resident Memory: %ld KBytes\n",
+             curTick(), func, file, line, memUsage(),resMem());
 
     //ADARSH
     time(&exit_time);
