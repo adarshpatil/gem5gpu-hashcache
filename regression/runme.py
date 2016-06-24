@@ -73,6 +73,8 @@ benchmarks = {
         '4g12': 'kmeans;milc;mcf;libquantum;bzip2',
         '4g13': 'heartwall;astar;milc;soplex;cactusADM',
         '4g14': 'gaussian;astar;mcf;soplex;cactusADM',
+        '4g15': 'kmeans;bzip2;gobmk;hmmer;sphinx3',
+        '4g16': 'needle;gcc;libquantum;leslie3d;bwaves',
 
         # 8core
         '8g1' : 'hotspot;milc;mcf;bzip2;gcc;gobmk;libquantum;hmmer;sphinx3',
