@@ -213,7 +213,7 @@ for benchmark in run_mix:
         final_config = final_config + '\n--dramcache'
 
     final_config = final_config + '\n--num-cpus=' + str(num_cores)
-    final_config = final_config + '\n--maxinsts=' + std(max_insts)
+    final_config = final_config + '\n--maxinsts=' + str(max_insts)
     final_config = final_config + '\n' + '--benchmark ' + benchmarks[benchmark]
 
     config_file_fp = open(suite_results_dir+'/'+benchmark+cpt_run_suffix+'/myconfig', "a")
