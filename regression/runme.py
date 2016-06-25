@@ -113,8 +113,7 @@ cpt_common_config = '''--work-begin-checkpoint-count=1
 run_common_config = '''--checkpoint-restore=1
 --restore-with-cpu=timing
 --standard-switch=1
---warmup-insts=50000
---maxinsts=500000000
+--warmup-insts=500000
 --caches
 --clusters=8
 --flush_kernel_end
@@ -172,8 +171,10 @@ for benchmark in run_mix:
     print ("Got benchmark " + benchmark)
     if benchmark[0] == '4':
         num_cores = 5
+        max_insts = 250000000
     else:
         num_cores = 9
+        max_insts = 125000000
 
     if args.dramcache and int(args.memory) == '8':
         suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-256ML3'
@@ -212,6 +213,7 @@ for benchmark in run_mix:
         final_config = final_config + '\n--dramcache'
 
     final_config = final_config + '\n--num-cpus=' + str(num_cores)
+    final_config = final_config + '\n--maxinsts=' + std(max_insts)
     final_config = final_config + '\n' + '--benchmark ' + benchmarks[benchmark]
 
     config_file_fp = open(suite_results_dir+'/'+benchmark+cpt_run_suffix+'/myconfig', "a")
