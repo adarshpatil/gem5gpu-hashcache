@@ -190,6 +190,7 @@ for benchmark in run_mix:
     if args.run:
         cpt_run_suffix = '.run'
         final_config = run_common_config + '\n--checkpoint-dir=' + suite_results_dir + '/'+ benchmark + '.cpt'
+        final_config = final_config + '\n--maxinsts=' + str(max_insts)
     else:
         cpt_run_suffix = '.cpt'
         final_config = cpt_common_config
@@ -213,7 +214,6 @@ for benchmark in run_mix:
         final_config = final_config + '\n--dramcache'
 
     final_config = final_config + '\n--num-cpus=' + str(num_cores)
-    final_config = final_config + '\n--maxinsts=' + str(max_insts)
     final_config = final_config + '\n' + '--benchmark ' + benchmarks[benchmark]
 
     config_file_fp = open(suite_results_dir+'/'+benchmark+cpt_run_suffix+'/myconfig', "a")
