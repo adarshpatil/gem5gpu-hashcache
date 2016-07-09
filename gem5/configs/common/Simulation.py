@@ -210,6 +210,8 @@ def scriptCheckpoints(options, maxtick, cptdir):
         exit_event = m5.simulate()
         exit_cause = exit_event.getCause()
         print "exit cause = %s" % exit_cause
+        print "Dumping stats"
+        m5.stats.dump()
 
         # skip checkpoint instructions should they exist
         while exit_cause == "checkpoint":

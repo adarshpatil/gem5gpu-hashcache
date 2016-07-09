@@ -82,8 +82,64 @@ benchmarks = {
         '8g3' : 'streamcluster;astar;milc;mcf;bzip2;gcc;gobmk;libquantum;hmmer',
         '8g4' : 'gaussian;cactusADM;soplex;mcf;bzip2;gcc;leslie3d;libquantum;sphinx3',
         '8g5' : 'bfs;astar;milc;mcf;soplex;bzip2;gcc;hmmer;libquantum',
-        '8g6' : 'kmeans;astar;milc;soplex;cactusADM;bzip2;sphinx3;hmmer;leslie3d'
+        '8g6' : 'kmeans;astar;milc;soplex;cactusADM;bzip2;sphinx3;hmmer;leslie3d',
+
+        # 4 core only CPU
+        '4c1' : 'soplex;bzip2;gobmk;hmmer',
+        '4c2' : 'cactusADM;gcc;bzip2;sphinx3',
+        '4c3' : 'mcf;libquantum;gobmk;sphinx3',
+        '4c4' : 'astar;milc;gcc;leslie3d',
+        '4c5' : 'astar;milc;gobmk;bwaves',
+        '4c6' : 'astar;cactusADM;libquantum;sphinx3',
+        '4c7' : 'astar;mcf;gobmk;sphinx3',
+        '4c8' : 'astar;mcf;gcc;bzip2',
+        '4c9' : 'soplex;milc;mcf;bwaves',
+        '4c10': 'astar;soplex;cactusADM;libquantum',
+        '4c11': 'astar;soplex;mcf;gcc',
+        '4c12': 'milc;mcf;libquantum;bzip2',
+        '4c13': 'astar;milc;soplex;cactusADM',
+        '4c14': 'astar;mcf;soplex;cactusADM',
+        '4c15': 'bzip2;gobmk;hmmer;sphinx3',
+        '4c16': 'gcc;libquantum;leslie3d;bwaves',
+
+        # 8core only CPU
+        '8c1' : 'milc;mcf;bzip2;gcc;gobmk;libquantum;hmmer;sphinx3',
+        '8c2' : 'soplex;cactusADM;libquantum;bzip2;gobmk;leslie3d;hmmer;sphinx3',
+        '8c3' : 'astar;milc;mcf;bzip2;gcc;gobmk;libquantum;hmmer',
+        '8c4' : 'cactusADM;soplex;mcf;bzip2;gcc;leslie3d;libquantum;sphinx3',
+        '8c5' : 'astar;milc;mcf;soplex;bzip2;gcc;hmmer;libquantum',
+        '8c6' : 'astar;milc;soplex;cactusADM;bzip2;sphinx3;hmmer;leslie3d'
+
     }
+
+# this array[workload_num] gives max insts to take checkpoint at for a CPU only
+# max insts is almost same for 4 core 8G and 16G so we maintain single list
+take_cpt_cpu_insts_4c = [ 9889117449,
+        2712381995,
+        2527811173,
+        4028229395,
+        9889117449,
+        1952615069,
+        3769966693,
+        2903847752,
+        7420173315,
+        5960887950,
+        9889117449,
+        5960887950,
+        0,
+        2644338902,
+        5960887950,
+        2712381995,
+    ]
+
+# place holder to be filled
+take_cpt_cpu_insts_8c = [ 9889117449,
+        2712381995,
+        2527811173,
+        4028229395,
+        9889117449,
+        1952615069,
+    ]
 
 cpt_common_config = '''--work-begin-checkpoint-count=1
 --caches
@@ -139,6 +195,40 @@ run_common_config = '''--checkpoint-restore=1
 --benchmark_stderr benchstderr
 --gpuapp_in_workload'''
 
+cpt_common_config_cpu = '''--at-instruction
+--max-checkpoints=1
+--caches
+--sys-clock=2.5GHz
+--cpu-clock=2.5GHz
+--l1d_size=32kB
+--l1d_assoc=8
+--l1i_size=32kB
+--l1i_assoc=8
+--l2_size=256kB
+--l2_assoc=8
+--mem-type=DDR3_1600_x64
+--dir-on
+--benchmark_stdout benchstdout
+--benchmark_stderr benchstderr'''
+
+run_common_config_cpu = '''--at-instruction
+--restore-with-cpu=timing
+--standard-switch=1
+--warmup-insts=500000
+--caches
+--sys-clock=2.5GHz
+--cpu-clock=2.5GHz
+--l1d_size=32kB
+--l1d_assoc=8
+--l1i_size=32kB
+--l1i_assoc=8
+--l2_size=256kB
+--l2_assoc=8
+--mem-type=DDR3_1600_x64
+--dir-on
+--benchmark_stdout benchstdout
+--benchmark_stderr benchstderr'''
+
 '''
 DRAM CACHE PREDEFINED CONFIGURATION
 4G - 1 cntrl - 128M dram cache
@@ -166,35 +256,58 @@ command = main_prefix + '''/gem5/build/X86_VI_hammer_GPU/gem5.opt -r -e --outdir
 
 cpt_run_suffix = ''
 final_config = ''
+take_cpt_insts = 0
 
 for benchmark in run_mix:
     print ("Got benchmark " + benchmark)
-    if benchmark[0] == '4':
-        num_cores = 5
-        max_insts = 250000000
-    else:
-        num_cores = 9
-        max_insts = 125000000
+    if benchmark[1] == 'g':
+        if benchmark[0] == '4':
+            num_cores = 5
+            max_insts = 250000000
+        else:
+            num_cores = 9
+            max_insts = 125000000
+
+    elif benchmark[1] == 'c':
+        if benchmark[0] == '4':
+            num_cores = 4
+            max_insts = 250000000
+            take_cpt_insts = take_cpt_cpu_insts_4c[int(benchmark[0])]
+        else:
+            num_cores = 8
+            max_insts = 125000000
+            take_cpt_insts = take_cpt_cpu_insts_8c[int(benchmark[0])]
 
     if args.dramcache and int(args.memory) == '8':
         suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-256ML3'
     if args.dramcache and int(args.memory) == '16':
         suite_results_dir = results_dir + '/' + benchmark[0] + 'core-16G-512ML3'
     else:
-        suite_results_dir = results_dir + '/4core-' + args.memory + 'G-noL3'
+        suite_results_dir = results_dir + '/' + benchmark[0] + 'core-' + args.memory + 'G-noL3'
 
     # create results dir /results/suite_dir/benchmarks_dir/(files)
     if not os.path.exists(suite_results_dir):
         os.makedirs(suite_results_dir)
 
-    if args.run:
-        cpt_run_suffix = '.run'
-        final_config = run_common_config + '\n--checkpoint-dir=' + suite_results_dir + '/'+ benchmark + '.cpt'
-        final_config = final_config + '\n--maxinsts=' + str(max_insts)
-    else:
-        cpt_run_suffix = '.cpt'
-        final_config = cpt_common_config
+    ## 4gX benchmarks
+    if benchmark[1] == 'g':
+        if args.run:
+            cpt_run_suffix = '.run'
+            final_config = run_common_config + '\n--checkpoint-dir=' + suite_results_dir + '/'+ benchmark + '.cpt'
+            final_config = final_config + '\n--maxinsts=' + str(max_insts)
+        else:
+            cpt_run_suffix = '.cpt'
+            final_config = cpt_common_config
 
+    ## 4cX benchmarks
+    if benchmark[1] == 'c':
+        if args.run:
+            cpt_run_suffix = '.run'
+            final_config = run_common_config_cpu + '\n--checkpoint-dir=' + suite_results_dir + '/'+ benchmark + '.cpt'
+            final_config = final_config + '\n--maxinsts=' + str(max_insts) + '\n--checkpoint-restore=' + str(take_cpt_insts)
+        else:
+            cpt_run_suffix = '.cpt'
+            final_config = '--take-checkpoint=' + str(take_cpt_insts) + '\n' + cpt_common_config_cpu
 
     if not os.path.exists(suite_results_dir+'/'+benchmark + cpt_run_suffix):
         os.makedirs(suite_results_dir+'/'+benchmark + cpt_run_suffix)
