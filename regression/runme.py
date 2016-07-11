@@ -272,11 +272,11 @@ for benchmark in run_mix:
         if benchmark[0] == '4':
             num_cores = 4
             max_insts = 250000000
-            take_cpt_insts = take_cpt_cpu_insts_4c[int(benchmark[0])]
+            take_cpt_insts = take_cpt_cpu_insts_4c[int(benchmark[2])-1]
         else:
             num_cores = 8
             max_insts = 125000000
-            take_cpt_insts = take_cpt_cpu_insts_8c[int(benchmark[0])]
+            take_cpt_insts = take_cpt_cpu_insts_8c[int(benchmark[2])-1]
 
     if args.dramcache and int(args.memory) == '8':
         suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-256ML3'
