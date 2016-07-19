@@ -563,8 +563,8 @@ class DRAMCtrl : public AbstractMemory
      * @param isRead Is the request for a read or a write to DRAM
      * @return A DRAMPacket pointer with the decoded information
      */
-    DRAMPacket* decodeAddr(PacketPtr pkt, Addr dramPktAddr, unsigned int size,
-                           bool isRead);
+    virtual DRAMPacket* decodeAddr(PacketPtr pkt, Addr dramPktAddr,
+                           unsigned int size, bool isRead);
 
     /**
      * The memory schduler/arbiter - picks which request needs to
@@ -792,6 +792,13 @@ class DRAMCtrl : public AbstractMemory
     Stats::Vector writePktSize;
     Stats::Vector rdQLenPdf;
     Stats::Vector wrQLenPdf;
+
+    // ADARSH added cpu rd/wr Q Len PDF
+    // i.e. what QLen do incoming CPU Packets see
+    // what Q Len GPU Packets see is rdQLenPdf[x] (minus) cpurdQLenPdf[x]
+    Stats::Vector cpurdQLenPdf;
+    Stats::Vector cpuwrQLenPdf;
+
     Stats::Histogram bytesPerActivate;
     Stats::Histogram rdPerTurnAround;
     Stats::Histogram wrPerTurnAround;
@@ -889,9 +896,9 @@ class DRAMCtrl : public AbstractMemory
 
   protected:
 
-    Tick recvAtomic(PacketPtr pkt);
-    void recvFunctional(PacketPtr pkt);
-    bool recvTimingReq(PacketPtr pkt);
+    virtual Tick recvAtomic(PacketPtr pkt);
+    virtual void recvFunctional(PacketPtr pkt);
+    virtual bool recvTimingReq(PacketPtr pkt);
 
 };
 

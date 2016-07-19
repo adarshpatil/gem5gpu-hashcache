@@ -189,6 +189,9 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
                   tRRD_L, tRRD, bankGroupsPerRank);
         }
     }
+    DPRINTF(DRAM,"DRAM columnsPerStripe:%d, channels:%d, banksPerRank:%d, ranksPerChannel:%d, columnsPerRowBuffer:%d, rowsPerBank:%d, burstSize:%d\n",
+    	          columnsPerStripe,channels,banksPerRank,ranksPerChannel,columnsPerRowBuffer,rowsPerBank,burstSize);
+
 
 }
 
@@ -320,6 +323,7 @@ DRAMCtrl::decodeAddr(PacketPtr pkt, Addr dramPktAddr, unsigned size,
     // truncate the address to a DRAM burst, which makes it unique to
     // a specific column, row, bank, rank and channel
     Addr addr = dramPktAddr / burstSize;
+    DPRINTF(DRAM,"decode addr:%ld, dramPktAddr:%ld\n", addr, dramPktAddr);
 
     // we have removed the lowest order address bits that denote the
     // position within the column
@@ -475,6 +479,9 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 
             assert(!readQueueFull(1));
             rdQLenPdf[readQueue.size() + respQueue.size()]++;
+            // ADARSH Increment cpu read Q len Pdf
+            if (pkt->req->contextId() != 31)
+                cpurdQLenPdf[readQueue.size() + respQueue.size()]++;
 
             DPRINTF(DRAM, "Adding to read queue\n");
 
@@ -534,6 +541,9 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
 
             assert(writeQueue.size() < writeBufferSize);
             wrQLenPdf[writeQueue.size()]++;
+            // ADARSH Increment cpuwrite queue len
+            if (pkt->req->contextId() == 31)
+                cpuwrQLenPdf[writeQueue.size()]++;
 
             DPRINTF(DRAM, "Adding to write queue\n");
 
@@ -1899,6 +1909,7 @@ DRAMCtrl::Rank::regStats()
         .name(name() + ".averagePower")
         .desc("Core power per rank (mW)");
 }
+
 void
 DRAMCtrl::regStats()
 {
