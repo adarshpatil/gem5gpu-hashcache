@@ -2055,6 +2055,16 @@ DRAMCtrl::regStats()
         .name(name() + ".wrQLenPdf")
         .desc("What write queue length does an incoming req see");
 
+     cpurdQLenPdf
+        .init(readBufferSize)
+        .name(name() + ".cpurdQLenPdf")
+        .desc("What read queue length does an incoming CPU req see");
+
+     cpuwrQLenPdf
+        .init(writeBufferSize)
+        .name(name() + ".cpuwrQLenPdf")
+        .desc("What write queue length does an incoming CPU req see");
+
      bytesPerActivate
          .init(maxAccessesPerRow)
          .name(name() + ".bytesPerActivate")
@@ -2245,7 +2255,7 @@ DRAMCtrl::drainResume()
 
 DRAMCtrl::MemoryPort::MemoryPort(const std::string& name, DRAMCtrl& _memory)
     : QueuedSlavePort(name, &_memory, queue), queue(_memory, *this),
-      memory(_memory)
+      memory(_memory), blocked(false),sendRetryEvent(this)
 { }
 
 AddrRangeList
@@ -2282,6 +2292,43 @@ DRAMCtrl::MemoryPort::recvTimingReq(PacketPtr pkt)
 {
     // pass it to the memory controller
     return memory.recvTimingReq(pkt);
+}
+
+void
+DRAMCtrl::MemoryPort::setBlocked()
+{
+    assert(!blocked);
+    DPRINTF(DRAM, "Port is blocking new requests\n");
+    blocked = true;
+    // if we already scheduled a retry in this cycle, but it has not yet
+    // happened, cancel it
+    if (sendRetryEvent.scheduled()) {
+        owner.deschedule(sendRetryEvent);
+        DPRINTF(DRAM, "Port descheduled retry\n");
+        mustSendRetry = true;
+    }
+}
+
+void
+DRAMCtrl::MemoryPort::clearBlocked()
+{
+    assert(blocked);
+    DPRINTF(DRAM, "Port is accepting new requests\n");
+    blocked = false;
+    if (mustSendRetry) {
+        // @TODO: need to find a better time (next cycle?)
+        owner.schedule(sendRetryEvent, curTick() + 1);
+    }
+}
+
+void
+DRAMCtrl::MemoryPort::processSendRetry()
+{
+    DPRINTF(DRAM, "Port is sending retry\n");
+
+    // reset the flag and call retry
+    mustSendRetry = false;
+    sendRetryReq();
 }
 
 DRAMCtrl*

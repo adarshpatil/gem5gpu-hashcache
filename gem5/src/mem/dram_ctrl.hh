@@ -89,7 +89,8 @@
 class DRAMCtrl : public AbstractMemory
 {
 
-  private:
+//private:
+  public:
 
     // For now, make use of a queued slave port to avoid dealing with
     // flow control for the responses being sent back
@@ -103,7 +104,17 @@ class DRAMCtrl : public AbstractMemory
 
         MemoryPort(const std::string& name, DRAMCtrl& _memory);
 
+        // use to block port - used only by dramcache
+        void setBlocked();
+
+        void clearBlocked();
+
+        bool isBlocked() const { return blocked; }
+
       protected:
+
+        bool blocked; // indicates if the port is blocked - used only by dramcache
+        bool mustSendRetry;
 
         Tick recvAtomic(PacketPtr pkt);
 
@@ -112,6 +123,13 @@ class DRAMCtrl : public AbstractMemory
         bool recvTimingReq(PacketPtr);
 
         virtual AddrRangeList getAddrRanges() const;
+
+      protected:
+        void processSendRetry();
+
+        EventWrapper<MemoryPort,
+                     &MemoryPort::processSendRetry> sendRetryEvent;
+
 
     };
 
@@ -480,7 +498,7 @@ class DRAMCtrl : public AbstractMemory
     void processNextReqEvent();
     EventWrapper<DRAMCtrl,&DRAMCtrl::processNextReqEvent> nextReqEvent;
 
-    void processRespondEvent();
+    virtual void processRespondEvent();
     EventWrapper<DRAMCtrl, &DRAMCtrl::processRespondEvent> respondEvent;
 
     /**
@@ -879,7 +897,7 @@ class DRAMCtrl : public AbstractMemory
     };
 
 
-  public:
+//public:
 
     void regStats();
 
@@ -894,10 +912,10 @@ class DRAMCtrl : public AbstractMemory
     virtual void startup() M5_ATTR_OVERRIDE;
     virtual void drainResume() M5_ATTR_OVERRIDE;
 
-  protected:
+//protected:
 
     virtual Tick recvAtomic(PacketPtr pkt);
-    virtual void recvFunctional(PacketPtr pkt);
+    void recvFunctional(PacketPtr pkt);
     virtual bool recvTimingReq(PacketPtr pkt);
 
 };

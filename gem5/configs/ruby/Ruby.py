@@ -116,7 +116,7 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
         if options.dramcache:
             dramcache_ctrl = MemConfig.create_dramcache_ctrl(
                 MemConfig.get_cache(options.dramcache_type), system.mem_ranges[0],
-                index, options.dramcache_size,
+                index, options.num_dirs, options.dramcache_size,
                 options.dramcache_assoc, options.dramcache_block_size)
 
             mem_ctrls.append(dramcache_ctrl)
@@ -129,10 +129,9 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
             crossbar = IOXBar()
             crossbars.append(crossbar)
             if options.dramcache:
-                dramcache_ctrl.memoryport = crossbar.slave
+                dramcache_ctrl.dramcache_masterport = crossbar.slave
             else:
                 dir_cntrl.memory = crossbar.slave
-
 
         for r in system.mem_ranges:
             # if dramcache exists interleave at dramcache_block_size
@@ -151,7 +150,7 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
                 mem_ctrl.port = crossbar.master
             else:
                 if options.dramcache:
-                    mem_ctrl.port = dramcache_ctrl.memoryport
+                    mem_ctrl.port = dramcache_ctrl.dramcache_masterport
                 else:
                     mem_ctrl.port = dir_cntrl.memory
 

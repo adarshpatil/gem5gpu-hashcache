@@ -2,17 +2,28 @@ from m5.params import *
 from AbstractMemory import *
 from DRAMCtrl import *
 
+class DRAMCacheReplacementScheme(Enum): vals = ['lru', 'lruc', 'lrud']
+
 class DRAMCacheCtrl(DRAMCtrl):
     type = 'DRAMCacheCtrl'
     cxx_header = "mem/dramcache_ctrl.hh"
     
     # Master Port to interface with main memory
-    memoryport = MasterPort("Downstream master port to memory")
+    dramcache_masterport = MasterPort("Downstream master port to memory")
 
     # DRAMCache Params
-    dramcache_size = Param.MemorySize('512MB',"dramcache size")
+    dramcache_size = Param.MemorySize('128MB',"dramcache size")
+    # for now dramcache only models direct mapped alloy cache only
+    # dramcache_assoc cannot be anything other than 1
     dramcache_assoc = Param.Unsigned(1, "dramcache associativity")
     dramcache_block_size = Param.Unsigned(128, "dramcache block size")
+    # since assoc is currently fixed at 1, this param is just a place holder
+    dramcache_replacement_scheme = Param.DRAMCacheReplacementScheme('lru',"DRAM Cache replacement policy")
+
+    mshrs = Param.Unsigned(128,"Number of MSHRs (max outstanding requests)")
+    write_buffers = Param.Unsigned(32,"Number of write buffers")
+    demand_mshr_reserve = Param.Unsigned(1, "MSHRs reserved for demand access")
+    tgts_per_mshr = Param.Unsigned(16,"Max number of accesses per MSHR")
     
 # A single DDR3-1600 x64 channel (one command and address bus), with
 # timings based on a DDR3-1600 4 Gbit datasheet (Micron MT41J512M8) in
@@ -173,7 +184,17 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
 
     # Set default controller parameters
     page_policy = 'close'
-    write_buffer_size = 8
-    read_buffer_size = 8
+    # write_buffer_size = 8
+    # read_buffer_size = 8
+    # ADARSH Since we double both num of layers and size of each layer, we x4 buffer sizes
+    write_buffer_size = 32
+    read_buffer_size = 32
     addr_mapping = 'RoCoRaBaCh'
     min_writes_per_switch = 8
+
+    # ADARSH FCFS policy for closed page in cache
+    mem_sched_policy = 'fcfs'
+
+    mshrs = 128
+    demand_mshr_reserve = 1
+    tgts_per_mshr = 16
