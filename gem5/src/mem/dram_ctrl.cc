@@ -1245,6 +1245,12 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
         totBusLat += tBURST;
         totQLat += cmd_at - dram_pkt->entryTime;
+        if(dram_pkt->pkt->req->contextId() == 31) {
+             gpuQLat += cmd_at - dram_pkt->entryTime;
+        }
+        else {
+            cpuQLat += cmd_at - dram_pkt->entryTime;
+        }
     } else {
         ++writesThisTime;
         if (row_hit)
@@ -1983,6 +1989,14 @@ DRAMCtrl::regStats()
         .name(name() + ".totMemAccLat")
         .desc("Total ticks spent from burst creation until serviced "
               "by the DRAM");
+
+    cpuQLat
+            .name(name() + ".cpuQLat")
+            .desc("ticks spent queuing for CPU Requests");
+
+    gpuQLat
+            .name(name() + ".gpuQLat")
+            .desc("Total ticks spent queuing for GPU Requests");
 
     avgQLat
         .name(name() + ".avgQLat")

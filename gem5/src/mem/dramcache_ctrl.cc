@@ -8,7 +8,9 @@
 #include "mem/dramcache_ctrl.hh"
 #include "debug/DRAMCache.hh"
 #include "debug/Drain.hh"
+#include "mem/ruby/system/RubyPort.hh"
 
+#include <algorithm>
 using namespace std;
 using namespace Data;
 
@@ -388,8 +390,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	pendingDelete.clear ();
 
 	// This is where we enter from the outside world
-	DPRINTF(
-			DRAMCache,
+	DPRINTF(DRAMCache,
 			"ADARSH recvTimingReq: request %s addr %lld size %d, ContextId: %d Threadid: %d\n",
 			pkt->cmdString(), pkt->getAddr(), pkt->getSize(), pkt->req->contextId(),
 			pkt->req->threadId());
@@ -414,12 +415,26 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	}
 	prevArrival = curTick ();
 
-	// operation is as follows: check hit or miss
+	// do prediction using predictorTable to perform SAM or PAM
+	// operation is as follows: check MSHR hit or miss
+	// start DRAMCache access; check hit or miss
 	// if miss send fill request, add to MSHR
 	// don't remove cache conflict line till fill req returns
 	// once fill req returns, remove from MSHR, alloc cache block
 	// if conflict line is dirty - allocate writeBuffer and send for WB
-	// once received wb ack remove from writeBuffer
+	// once wb ack is received, remove from writeBuffer
+
+	// perform prediction using cache address; lookup RubyPort::predictorTable
+	Addr alignedAddr = pkt->getAddr() & ~(Addr(128 - 1));
+	DPRINTF(DRAMCache,"PC for addr: %d\n",RubyPort::pcTable[alignedAddr]);
+
+	RubyPort::mruPcAddrList.remove(alignedAddr);
+	RubyPort::mruPcAddrList.push_front(alignedAddr);
+
+	DPRINTF(DRAMCache,"begin of lruAddrList\n");
+	for (auto it=RubyPort::mruPcAddrList.begin(); it!=RubyPort::mruPcAddrList.end(); ++it)
+			DPRINTF(DRAMCache,"%d\n",*it);
+	DPRINTF(DRAMCache,"end of mruPcAddrList\n");
 
 	// ADARSH check MSHR if there is outstanding request for this address
 	Addr blk_addr = blockAlign (pkt->getAddr ());
@@ -810,7 +825,6 @@ DRAMCacheCtrl::getTimingPacket ()
 	PacketPtr tgt_pkt = mshr->getTarget ()->pkt;
 	PacketPtr pkt;
 
-	DPRINTF(DRAMCache, "get timing packet\n");
 	DPRINTF(DRAMCache, "%s %s for addr %d size %d isFowardNoResponse %d\n",
 			__func__, tgt_pkt->cmdString(), tgt_pkt->getAddr(),
 			tgt_pkt->getSize(), mshr->isForwardNoResponse());
@@ -819,7 +833,7 @@ DRAMCacheCtrl::getTimingPacket ()
 	MemCmd cmd = (mshr->queue->index - 1) ? MemCmd::ReadReq : MemCmd::WriteReq;
 
 	pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);
-	tgt_pkt->senderState = mshr;
+	pkt->senderState = mshr;
 
 	return pkt;
 
@@ -839,7 +853,8 @@ DRAMCacheCtrl::DRAMCacheReqPacketQueue::sendDeferredPacket ()
 
 	DPRINTF(DRAMCache, "inside sendDeferredPacket\n");
 
-	PacketPtr pkt = cache.getTimingPacket ();
+	PacketPtr pkt = cache.getTimingPacket();
+
 	if (pkt == NULL)
 		DPRINTF(DRAMCache, "sendDefferedPacket got no timing Packet");
 	else

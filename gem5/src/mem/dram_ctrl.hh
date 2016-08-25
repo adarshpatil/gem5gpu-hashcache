@@ -825,6 +825,8 @@ class DRAMCtrl : public AbstractMemory
     Stats::Scalar totQLat;
     Stats::Scalar totMemAccLat;
     Stats::Scalar totBusLat;
+    Stats::Scalar cpuQLat;
+    Stats::Scalar gpuQLat;
 
     // Average latencies per request
     Stats::Formula avgQLat;

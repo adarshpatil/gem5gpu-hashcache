@@ -44,7 +44,8 @@
 
 #include <cassert>
 #include <string>
-
+#include <map> //ADARSH added
+#include <list> //ADARSH added
 #include "mem/protocol/RequestStatus.hh"
 #include "mem/ruby/network/MessageBuffer.hh"
 #include "mem/ruby/system/System.hh"
@@ -57,6 +58,16 @@ class AbstractController;
 class RubyPort : public MemObject
 {
   public:
+
+	// ADARSH PC to Address mapping
+	// predictor table size fixed to 1024
+	// TODO implement 1024
+	typedef std::map<Addr, Addr> PCAddrMap;
+	static PCAddrMap pcTable;
+	static const int pcTableMaxSize=1024;
+	typedef std::list<Addr> AddrList;
+	static AddrList mruPcAddrList;
+
     class MemMasterPort : public QueuedMasterPort
     {
       private:

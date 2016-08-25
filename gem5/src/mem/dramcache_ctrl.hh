@@ -76,7 +76,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 
         /**
          * Override the normal sendDeferredPacket and do not only
-         * consider the transmit list (used for responses), but also
+         * consider the transmit list (used for responses), but also MSHR
          * requests.
          */
         virtual void sendDeferredPacket();
@@ -289,6 +289,8 @@ class DRAMCacheCtrl : public DRAMCtrl
         assert(addr == blockAlign(addr));
 
         MSHR *mshr = mq->allocate(addr, size, pkt, time, order++);
+
+        mshr->queue = mq;
 
         if (mq->isFull()) {
             setBlocked((BlockedCause)mq->index);

@@ -51,6 +51,9 @@
 #include "sim/full_system.hh"
 #include "sim/system.hh"
 
+RubyPort::PCAddrMap RubyPort::pcTable;
+RubyPort::AddrList RubyPort::mruPcAddrList;
+
 RubyPort::RubyPort(const Params *p)
     : MemObject(p), m_ruby_system(p->ruby_system), m_version(p->version),
       m_controller(NULL), m_mandatory_q_ptr(NULL),
@@ -225,8 +228,28 @@ RubyPort::PioSlavePort::recvTimingReq(PacketPtr pkt)
 bool
 RubyPort::MemSlavePort::recvTimingReq(PacketPtr pkt)
 {
-	DPRINTF(RubyPort, "ADARSH Timing request for address %#x on port %d, ContextId: %d Threadid:%d\n",
-			pkt->getAddr(), id, pkt->req->contextId(), pkt->req->threadId());
+	DPRINTF(RubyPort, "ADARSH Timing request for address %d on port %d, ContextId: %d Threadid:%d hasPC:%d\n",
+			pkt->getAddr(), id, pkt->req->contextId(), pkt->req->threadId(), pkt->req->hasPC());
+
+	// ADARSH add to addr -> pc mapping in a dictionary for dramcache predictor
+	if(pkt->req->hasPC())
+	{
+		// ADARSH block align to 128 byte cache line
+		// TODO hardcoded to 128 byte cache line size!
+		Addr alignedAddr = pkt->getAddr() & ~(Addr(128 - 1));
+		if(mruPcAddrList.size() == pcTableMaxSize)
+		{
+			Addr backAddr = mruPcAddrList.back();
+			DPRINTF(RubyPort,"Pred table max size reached, removing back addr:%d\n", backAddr);
+			pcTable.erase(backAddr);
+		}
+		DPRINTF(RubyPort,"storing addr: %d pc: %d\n", alignedAddr, pkt->req->getPC());
+		pcTable[alignedAddr] = pkt->req->getPC();
+		mruPcAddrList.push_front(alignedAddr);
+	}
+	else
+		warn("no PC value found for address:%d", pkt->getAddr());
+
     RubyPort *ruby_port = static_cast<RubyPort *>(&owner);
 
     if (pkt->memInhibitAsserted())
