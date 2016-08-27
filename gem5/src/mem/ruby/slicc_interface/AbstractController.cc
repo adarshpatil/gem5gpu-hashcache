@@ -214,15 +214,20 @@ AbstractController::queueMemoryRead(const MachineID &id, Addr addr,
 {
     RequestPtr req = new Request(addr, RubySystem::getBlockSizeBytes(), 0,
                                  m_masterId);
+
+    // ADARSH here we set context id for the request based on the Machine Id num
     if (id.getType() == MachineType_L1Cache)
-        req->setContextId(0);
+        req->setContextId(id.getNum());
     else if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
         req->setContextId(31);
 
-    DPRINTF(RubyQueue,"ADARSH queueMemoryRead MachineID num: %d type: %d masterId: %d  last: \n", id.getNum(), id.getType(), m_masterId, MachineIDToString(id));
     PacketPtr pkt = Packet::createRead(req);
     uint8_t *newData = new uint8_t[RubySystem::getBlockSizeBytes()];
     pkt->dataDynamic(newData);
+
+    DPRINTF(RubyQueue,"ADARSH queueMemoryRead MachineID num: %d type: %d masterId: %d\n",
+            id.getNum(), id.getType(), m_masterId, MachineIDToString(id));
+
 
     SenderState *s = new SenderState(id);
     pkt->pushSenderState(s);
@@ -243,17 +248,21 @@ AbstractController::queueMemoryWrite(const MachineID &id, Addr addr,
 {
     RequestPtr req = new Request(addr, RubySystem::getBlockSizeBytes(), 0,
                                  m_masterId);
+
+    // ADARSH here we set context id for the request based on the Machine Id num
     if (id.getType() == MachineType_L1Cache)
-        req->setContextId(0);
+        req->setContextId(id.getNum());
     else if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
         req->setContextId(31);
 
-    DPRINTF(RubyQueue,"ADARSH queueMemoryWrite MachineID num: %d type: %d masterId: %d\n", id.getNum(), id.getType(), m_masterId);
     PacketPtr pkt = Packet::createWrite(req);
     uint8_t *newData = new uint8_t[RubySystem::getBlockSizeBytes()];
     pkt->dataDynamic(newData);
     memcpy(newData, block.getData(0, RubySystem::getBlockSizeBytes()),
            RubySystem::getBlockSizeBytes());
+
+    DPRINTF(RubyQueue,"ADARSH queueMemoryWrite MachineID num: %d type: %d masterId: %d\n",
+            id.getNum(), id.getType(), m_masterId);
 
     SenderState *s = new SenderState(id);
     pkt->pushSenderState(s);
@@ -277,7 +286,7 @@ AbstractController::queueMemoryWritePartial(const MachineID &id, Addr addr,
     RequestPtr req = new Request(addr, RubySystem::getBlockSizeBytes(), 0,
                                  m_masterId);
     if (id.getType() == MachineType_L1Cache)
-        req->setContextId(0);
+        req->setContextId(id.getNum());
     else if (id.getType() == MachineType_GPUL2Cache || id.getType() == MachineType_GPUL1Cache || id.getType() == MachineType_GPUCopyDMA)
         req->setContextId(31);
 
