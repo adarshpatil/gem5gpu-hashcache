@@ -799,6 +799,8 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
 
 	PacketPtr pkt_copy = new Packet(pkt,false,false);
 
+	BurstHelper* burst_helper = NULL;
+
     for (int cnt = 0; cnt < pktCount; ++cnt) {
         unsigned size = burstSize;
 
@@ -813,7 +815,15 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
         // if the item was not merged we need to create a new write
         // and enqueue it
         if (!merged) {
+            // Make the burst helper for split packets
+            if (pktCount > 1 && burst_helper == NULL) {
+                DPRINTF(DRAMCache, "Write to addr %lld translates to %d "
+                        "dram requests\n", pkt->getAddr(), pktCount);
+                burst_helper = new BurstHelper(pktCount);
+            }
+
             DRAMPacket* dram_pkt = decodeAddr(pkt_copy, addr, size, false);
+            dram_pkt->burstHelper = burst_helper;
 
             assert(writeQueue.size() < writeBufferSize);
             wrQLenPdf[writeQueue.size()]++;
