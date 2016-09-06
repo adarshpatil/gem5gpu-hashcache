@@ -62,11 +62,11 @@ class RubyPort : public MemObject
 	// ADARSH PC to Address mapping
 	// predictor table size fixed to 1024
 	// TODO implement 1024
-	typedef std::map<Addr, Addr> PCAddrMap;
-	static PCAddrMap pcTable;
+	typedef std::map<Addr, Addr> PCAddrMap; // this is for 1 core
+	static std::map<int, PCAddrMap> pcTable; // this is per core PCAddrMap
 	static const int pcTableMaxSize=1024;
 	typedef std::list<Addr> AddrList;
-	static AddrList mruPcAddrList;
+	static std::map<int,AddrList> mruPcAddrList;
 
     class MemMasterPort : public QueuedMasterPort
     {

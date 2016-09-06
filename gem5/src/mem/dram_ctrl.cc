@@ -483,7 +483,7 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
             if (pkt->req->contextId() != 31)
                 cpurdQLenPdf[readQueue.size() + respQueue.size()]++;
 
-            DPRINTF(DRAM, "Adding to read queue\n");
+            DPRINTF(DRAM, "Adding to read queue addr %d dramPktAddr %d\n", pkt->getAddr(), addr);
 
             readQueue.push_back(dram_pkt);
 
@@ -542,13 +542,15 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
             assert(writeQueue.size() < writeBufferSize);
             wrQLenPdf[writeQueue.size()]++;
             // ADARSH Increment cpuwrite queue len
-            if (pkt->req->contextId() == 31)
+            if (pkt->req->contextId() != 31)
                 cpuwrQLenPdf[writeQueue.size()]++;
 
             DPRINTF(DRAM, "Adding to write queue\n");
 
             writeQueue.push_back(dram_pkt);
             isInWriteQueue.insert(burstAlign(addr));
+            //DPRINTF(DRAM, "writeQueue size - %d\n", writeQueue.size());
+            //DPRINTF(DRAM, "isInWriteQueue size - %d\n", isInWriteQueue.size());
             assert(writeQueue.size() == isInWriteQueue.size());
 
             // Update stats
@@ -867,7 +869,7 @@ DRAMCtrl::reorderQueue(std::deque<DRAMPacket*>& queue, Tick extra_col_delay)
 void
 DRAMCtrl::accessAndRespond(PacketPtr pkt, Tick static_latency)
 {
-    DPRINTF(DRAM, "Responding to Address %lld.. ",pkt->getAddr());
+    DPRINTF(DRAM, "Responding to Address %lld.. \n",pkt->getAddr());
 
     bool needsResponse = pkt->needsResponse();
     // do the actual memory access which also turns the packet into a
@@ -1431,8 +1433,11 @@ DRAMCtrl::processNextReqEvent()
 
         doDRAMAccess(dram_pkt);
 
+        DPRINTF(DRAM, "writeQueue front being popped %d\n", dram_pkt->addr);
+        DPRINTF(DRAM, "before size writeQueue:%d isInWriteQueue:%d\n", writeQueue.size(), isInWriteQueue.size());
         writeQueue.pop_front();
         isInWriteQueue.erase(burstAlign(dram_pkt->addr));
+        DPRINTF(DRAM, "after size writeQueue:%d isInWriteQueue:%d\n", writeQueue.size(), isInWriteQueue.size());
         delete dram_pkt;
 
         // If we emptied the write queue, or got sufficiently below the

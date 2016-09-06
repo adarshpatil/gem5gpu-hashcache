@@ -14,9 +14,11 @@
 using namespace std;
 using namespace Data;
 
+map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
+
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
-    DRAMCtrl (p), dramCache_masterport (name () + ".dramcache_masterport",
-					*this), mshrQueue (
+    DRAMCtrl (p), respondWriteEvent(this),
+	dramCache_masterport (name () + ".dramcache_masterport",*this), mshrQueue (
 	"MSHRs", p->mshrs, 4, p->demand_mshr_reserve, MSHRQueue_MSHRs), writeBuffer (
 	"write buffer", p->write_buffers, p->mshrs + 1000, 0,
 	MSHRQueue_WriteBuffer), dramCache_size (p->dramcache_size), dramCache_assoc (
@@ -25,10 +27,10 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	p->dramcache_replacement_scheme), totalRows (0), system_cache_block_size (
 	128), // hardcoded to 128
     num_sub_blocks_per_way (0), total_gpu_lines (0), total_gpu_dirty_lines (0), order (
-	0), numTarget (p->tgts_per_mshr), blocked (0)
+	0), numTarget (p->tgts_per_mshr), blocked (0), num_cores(p->num_cores)
 {
 	DPRINTF(DRAMCache, "DRAMCacheCtrl constructor\n");
-
+	DPRINTF(DRAMCache, "num cores %d \n ", num_cores);
 	// determine the dram actual capacity from the DRAM config in Mbytes
 	uint64_t deviceCapacity = deviceSize / (1024 * 1024) * devicesPerRank
 			* ranksPerChannel;
@@ -64,25 +66,24 @@ void
 DRAMCacheCtrl::init ()
 {
 	DRAMCtrl::init ();
-	int i, j;
 	set = new dramCacheSet_t[dramCache_num_sets];
 	DPRINTF(DRAMCache, "dramCache_num_sets: %d\n", dramCache_num_sets);
 
 	// initialize sub block counter for each set - num_cache_blocks_per_way
-	for (i = 0; i < dramCache_num_sets; i++)
+	for (int i = 0; i < dramCache_num_sets; i++)
 	{
 		set[i].tag = 0;
 		set[i].valid = false;
 		set[i].dirty = false;
-		set[i].used = new bool[num_sub_blocks_per_way];
+		/*set[i].used = new bool[num_sub_blocks_per_way];
 		set[i].accessed = new uint64_t[num_sub_blocks_per_way];
 		set[i].written = new uint64_t[num_sub_blocks_per_way];
-		for (j = 0; j < num_sub_blocks_per_way; j++)
+		for (int j = 0; j < num_sub_blocks_per_way; j++)
 		{
 			set[i].used[j] = false;
 			set[i].accessed[j] = 0;
 			set[i].written[j] = 0;
-		}
+		}*/
 	}
 }
 
@@ -101,8 +102,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 	unsigned int cacheBlock = pkt->getAddr () / dramCache_block_size;
 	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
 	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
-	DPRINTF(DRAMCache, "pktAddr:%d, blockid:%d set:%d tag:%d\n", pkt->getAddr(),
-			cacheBlock, cacheSet, cacheTag);
+	DPRINTF(DRAMCache, "%s pktAddr:%d, blockid:%d set:%d tag:%d\n", __func__,
+			pkt->getAddr(), cacheBlock, cacheSet, cacheTag);
 	assert(cacheSet >= 0);
 	assert(cacheSet < dramCache_num_sets);
 
@@ -153,6 +154,14 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				set[cacheSet].dirty = true;
 
 		}
+
+		// Knowing its a hit; inc the prediction and do stats
+		Addr alignedAddr = pkt->getAddr() & ~(Addr(128 - 1));
+		int cid = pkt->req->contextId();
+		Addr pc = RubyPort::pcTable[cid][alignedAddr];
+		if(predict(cid, alignedAddr) == false) // predicted miss but was hit
+			dramCache_incorrect_pred++;
+		incMac(cid, pc);
 
 		// TODO do the sub block thing here NOT YET IMPLEMENTED
 		return true;
@@ -229,6 +238,14 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			}
 		}
 
+		// Knowing its a miss; dec the prediction and do stats
+		Addr alignedAddr = pkt->getAddr() & ~(Addr(128 - 1));
+		int cid = pkt->req->contextId();
+		Addr pc = RubyPort::pcTable[cid][alignedAddr];
+		if(predict(cid, alignedAddr) == true) // predicted hit but was miss
+			dramCache_incorrect_pred++;
+		decMac(cid, pc);
+
 		return false;
 	}
 	// don't worry about sending a fill request here, that will done elsewhere
@@ -249,21 +266,24 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 	// always the top bits, and check before creating the DRAMPacket
 	uint64_t row;
 
-	// ADARSH here the address should be the address of a set
-	// cuz DRAMCache is addressed by set
-	dramPktAddr = dramPktAddr / dramCache_block_size;
-	dramPktAddr = dramPktAddr % dramCache_num_sets;
+	//	ADARSH here the address should be the address of a set
+	//	cuz DRAMCache is addressed by set
+	//	This is not there because we have already done it at addtoRead/WriteQ
+	//	dramPktAddr = dramPktAddr / dramCache_block_size;
+	//	dramPktAddr = dramPktAddr % dramCache_num_sets;
 
 	// truncate the address to a DRAM burst, which makes it unique to
 	// a specific column, row, bank, rank and channel
-	Addr addr = dramPktAddr / burstSize;
-	DPRINTF(DRAMCache, "decode addr:%ld, dramPktAddr:%ld\n", addr, dramPktAddr);
+	// Addr addr = dramPktAddr / burstSize;
+	// DPRINTF(DRAMCache, "decode addr:%ld, dramPktAddr:%ld\n", addr, dramPktAddr);
 
 	// we have removed the lowest order address bits that denote the
 	// position within the column
 	// Using addrMapping == Enums::RoCoRaBaCh)
 	// optimise for closed page mode and utilise maximum
 	// parallelism of the DRAM (at the cost of power)
+
+	Addr addr = dramPktAddr;
 
 	// take out the lower-order column bits
 	addr = addr / columnsPerStripe; // div by 1
@@ -306,12 +326,284 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 }
 
 void
+DRAMCacheCtrl::processNextReqEvent()
+{
+	// ADARSH only change we make here remove burstAlign for isInwriteQueue
+    int busyRanks = 0;
+    for (auto r : ranks) {
+        if (!r->isAvailable()) {
+            // rank is busy refreshing
+            busyRanks++;
+
+            // let the rank know that if it was waiting to drain, it
+            // is now done and ready to proceed
+            r->checkDrainDone();
+        }
+    }
+
+    if (busyRanks == ranksPerChannel) {
+        // if all ranks are refreshing wait for them to finish
+        // and stall this state machine without taking any further
+        // action, and do not schedule a new nextReqEvent
+        return;
+    }
+
+    // pre-emptively set to false.  Overwrite if in READ_TO_WRITE
+    // or WRITE_TO_READ state
+    bool switched_cmd_type = false;
+    if (busState == READ_TO_WRITE) {
+        DPRINTF(DRAMCache, "Switching to writes after %d reads with %d reads "
+                "waiting\n", readsThisTime, readQueue.size());
+
+        // sample and reset the read-related stats as we are now
+        // transitioning to writes, and all reads are done
+        rdPerTurnAround.sample(readsThisTime);
+        readsThisTime = 0;
+
+        // now proceed to do the actual writes
+        busState = WRITE;
+        switched_cmd_type = true;
+    } else if (busState == WRITE_TO_READ) {
+        DPRINTF(DRAMCache, "Switching to reads after %d writes with %d writes "
+                "waiting\n", writesThisTime, writeQueue.size());
+
+        wrPerTurnAround.sample(writesThisTime);
+        writesThisTime = 0;
+
+        busState = READ;
+        switched_cmd_type = true;
+    }
+
+    // when we get here it is either a read or a write
+    if (busState == READ) {
+
+        // track if we should switch or not
+        bool switch_to_writes = false;
+
+        if (readQueue.empty()) {
+            // In the case there is no read request to go next,
+            // trigger writes if we have passed the low threshold (or
+            // if we are draining)
+            if (!writeQueue.empty() &&
+                (drainState() == DrainState::Draining ||
+                 writeQueue.size() > writeLowThreshold)) {
+
+                switch_to_writes = true;
+            } else {
+                // check if we are drained
+                if (drainState() == DrainState::Draining &&
+                    respQueue.empty()) {
+
+                    DPRINTF(Drain, "DRAM controller done draining\n");
+                    signalDrainDone();
+                }
+
+                // nothing to do, not even any point in scheduling an
+                // event for the next request
+                return;
+            }
+        } else {
+            // bool to check if there is a read to a free rank
+            bool found_read = false;
+
+            // Figure out which read request goes next, and move it to the
+            // front of the read queue
+            // If we are changing command type, incorporate the minimum
+            // bus turnaround delay which will be tCS (different rank) case
+            found_read = chooseNext(readQueue,
+                             switched_cmd_type ? tCS : 0);
+
+            // if no read to an available rank is found then return
+            // at this point. There could be writes to the available ranks
+            // which are above the required threshold. However, to
+            // avoid adding more complexity to the code, return and wait
+            // for a refresh event to kick things into action again.
+            if (!found_read)
+                return;
+
+            DRAMPacket* dram_pkt = readQueue.front();
+            assert(dram_pkt->rankRef.isAvailable());
+            // here we get a bit creative and shift the bus busy time not
+            // just the tWTR, but also a CAS latency to capture the fact
+            // that we are allowed to prepare a new bank, but not issue a
+            // read command until after tWTR, in essence we capture a
+            // bubble on the data bus that is tWTR + tCL
+            if (switched_cmd_type && dram_pkt->rank == activeRank) {
+                busBusyUntil += tWTR + tCL;
+            }
+
+            doDRAMAccess(dram_pkt);
+
+            // At this point we're done dealing with the request
+            readQueue.pop_front();
+
+            // sanity check
+            assert(dram_pkt->size <= burstSize);
+            assert(dram_pkt->readyTime >= curTick());
+
+            // Insert into response queue. It will be sent back to the
+            // requestor at its readyTime
+            if (respQueue.empty()) {
+                assert(!respondEvent.scheduled());
+                schedule(respondEvent, dram_pkt->readyTime);
+            } else {
+                assert(respQueue.back()->readyTime <= dram_pkt->readyTime);
+                assert(respondEvent.scheduled());
+            }
+
+            respQueue.push_back(dram_pkt);
+
+            // we have so many writes that we have to transition
+            if (writeQueue.size() > writeHighThreshold) {
+                switch_to_writes = true;
+            }
+        }
+
+        // switching to writes, either because the read queue is empty
+        // and the writes have passed the low threshold (or we are
+        // draining), or because the writes hit the hight threshold
+        if (switch_to_writes) {
+            // transition to writing
+            busState = READ_TO_WRITE;
+        }
+    } else {
+        // bool to check if write to free rank is found
+        bool found_write = false;
+
+        // If we are changing command type, incorporate the minimum
+        // bus turnaround delay
+        found_write = chooseNext(writeQueue,
+                                 switched_cmd_type ? std::min(tRTW, tCS) : 0);
+
+        // if no writes to an available rank are found then return.
+        // There could be reads to the available ranks. However, to avoid
+        // adding more complexity to the code, return at this point and wait
+        // for a refresh event to kick things into action again.
+        if (!found_write)
+            return;
+
+        DRAMPacket* dram_pkt = writeQueue.front();
+        assert(dram_pkt->rankRef.isAvailable());
+        // sanity check
+        assert(dram_pkt->size <= burstSize);
+
+        // add a bubble to the data bus, as defined by the
+        // tRTW when access is to the same rank as previous burst
+        // Different rank timing is handled with tCS, which is
+        // applied to colAllowedAt
+        if (switched_cmd_type && dram_pkt->rank == activeRank) {
+            busBusyUntil += tRTW;
+        }
+
+        doDRAMAccess(dram_pkt);
+
+        DPRINTF(DRAMCache, "writeQueue front being popped %d\n", dram_pkt->addr);
+        DPRINTF(DRAMCache, "before size writeQueue:%d isInWriteQueue:%d\n", writeQueue.size(), isInWriteQueue.size());
+        writeQueue.pop_front();
+        isInWriteQueue.erase(dram_pkt->addr);
+        DPRINTF(DRAMCache, "after size writeQueue:%d isInWriteQueue:%d\n", writeQueue.size(), isInWriteQueue.size());
+        // delete dram_pkt; ADARSH we will delete this later in the call back
+
+        // Insert into write response queue. It will be sent back to the
+        // requestor at its readyTime
+        if (dramPktWriteRespQueue.empty()) {
+            assert(!respondWriteEvent.scheduled());
+            schedule(respondWriteEvent, dram_pkt->readyTime);
+        } else {
+            assert(dramPktWriteRespQueue.back()->readyTime <= dram_pkt->readyTime);
+            assert(respondWriteEvent.scheduled());
+        }
+
+        dramPktWriteRespQueue.push_back(dram_pkt);
+
+        // If we emptied the write queue, or got sufficiently below the
+        // threshold (using the minWritesPerSwitch as the hysteresis) and
+        // are not draining, or we have reads waiting and have done enough
+        // writes, then switch to reads.
+        if (writeQueue.empty() ||
+            (writeQueue.size() + minWritesPerSwitch < writeLowThreshold &&
+             drainState() != DrainState::Draining) ||
+            (!readQueue.empty() && writesThisTime >= minWritesPerSwitch)) {
+            // turn the bus back around for reads again
+            busState = WRITE_TO_READ;
+
+            // note that the we switch back to reads also in the idle
+            // case, which eventually will check for any draining and
+            // also pause any further scheduling if there is really
+            // nothing to do
+        }
+    }
+    // It is possible that a refresh to another rank kicks things back into
+    // action before reaching this point.
+    if (!nextReqEvent.scheduled())
+        schedule(nextReqEvent, std::max(nextReqTime, curTick()));
+
+    // If there is space available and we have writes waiting then let
+    // them retry. This is done here to ensure that the retry does not
+    // cause a nextReqEvent to be scheduled before we do so as part of
+    // the next request processing
+    if (retryWrReq && writeQueue.size() < writeBufferSize) {
+        retryWrReq = false;
+        port.sendRetryReq();
+    }
+}
+
+void DRAMCacheCtrl::processRespondWriteEvent()
+{
+	DPRINTF(DRAMCache,
+			"%s: Some req has reached its readyTime\n", __func__);
+
+	DRAMPacket* dram_pkt = dramPktWriteRespQueue.front ();
+
+	DPRINTF(DRAMCache, "%s for address %d\n", __func__, dram_pkt->pkt->getAddr());
+
+	if (dram_pkt->burstHelper)
+	{
+		// it is a split packet
+		dram_pkt->burstHelper->burstsServiced++;
+		if (dram_pkt->burstHelper->burstsServiced
+				== dram_pkt->burstHelper->burstCount)
+		{
+			// we have now serviced all children packets of a system packet
+
+			delete dram_pkt->burstHelper;
+			dram_pkt->burstHelper = NULL;
+
+			// Now access is complete, TAD unit available => doCacheLookup
+			bool isHit = doCacheLookup (dram_pkt->pkt);
+
+			if (!isHit)  // miss send cache fill request
+			{
+				// send cache fill to master port - master port sends from MSHR
+				allocateMissBuffer (dram_pkt->pkt, tBURST, true);
+			}
+			else
+			{
+				delete dram_pkt->pkt;
+			}
+		}
+	}
+
+	delete dramPktWriteRespQueue.front ();
+	dramPktWriteRespQueue.pop_front ();
+
+	if (!dramPktWriteRespQueue.empty ())
+	{
+		assert(dramPktWriteRespQueue.front ()->readyTime >= curTick ());
+		assert(!respondWriteEvent.scheduled ());
+		schedule (respondWriteEvent, dramPktWriteRespQueue.front ()->readyTime);
+	}
+}
+
+void
 DRAMCacheCtrl::processRespondEvent ()
 {
 	DPRINTF(DRAMCache,
 			"processRespondEvent(): Some req has reached its readyTime\n");
 
 	DRAMPacket* dram_pkt = respQueue.front ();
+
+	DPRINTF(DRAMCache, "%s for address %d\n", __func__, dram_pkt->pkt->getAddr());
 
 	if (dram_pkt->burstHelper)
 	{
@@ -380,6 +672,199 @@ DRAMCacheCtrl::processRespondEvent ()
 	}
 }
 
+void
+DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
+{
+    // only add to the read queue here. whenever the request is
+    // eventually done, set the readyTime, and call schedule()
+    assert(!pkt->isWrite());
+
+    assert(pktCount != 0);
+
+    // if the request size is larger than burst size, the pkt is split into
+    // multiple DRAM packets
+    // Note if the pkt starting address is not aligened to burst size, the
+    // address of first DRAM packet is kept unaliged. Subsequent DRAM packets
+    // are aligned to burst size boundaries. This is to ensure we accurately
+    // check read packets against packets in write queue.
+    Addr addr = pkt->getAddr();
+
+	addr = addr / dramCache_block_size;
+	addr = addr % dramCache_num_sets;
+	// ADARSH packet count is 5; we need to number our sets in multiplies of 5
+	addr = addr * pktCount;
+
+    unsigned pktsServicedByWrQ = 0;
+    BurstHelper* burst_helper = NULL;
+
+    for (int cnt = 0; cnt < pktCount; ++cnt) {
+        //unsigned size = std::min((addr | (burstSize - 1)) + 1,
+        //                pkt->getAddr() + pkt->getSize()) - addr;
+
+    	// ADARSH for us the size is always burstSize
+    	unsigned size = burstSize;
+
+        readPktSize[ceilLog2(size)]++;
+        readBursts++;
+
+        // First check write buffer to see if the data is already at
+        // the controller
+        bool foundInWrQ = false;
+        Addr burst_addr = addr;
+        // if the burst address is not present then there is no need
+        // looking any further
+        if (isInWriteQueue.find(burst_addr) != isInWriteQueue.end()) {
+            for (const auto& p : writeQueue) {
+                // check if the read is subsumed in the write queue
+                // packet we are looking at
+                if (p->addr <= addr && (addr + size) <= (p->addr + p->size)) {
+                    foundInWrQ = true;
+                    servicedByWrQ++;
+                    pktsServicedByWrQ++;
+                    DPRINTF(DRAMCache, "Read to addr %lld with size %d serviced by "
+                            "write queue\n", addr, size);
+                    bytesReadWrQ += burstSize;
+                    break;
+                }
+            }
+        }
+
+        // If not found in the write q, make a DRAM packet and
+        // push it onto the read queue
+        if (!foundInWrQ) {
+
+            // Make the burst helper for split packets
+            if (pktCount > 1 && burst_helper == NULL) {
+                DPRINTF(DRAMCache, "Read to addr %lld translates to %d "
+                        "dram requests\n", pkt->getAddr(), pktCount);
+                burst_helper = new BurstHelper(pktCount);
+            }
+
+            DRAMPacket* dram_pkt = decodeAddr(pkt, addr, size, true);
+            dram_pkt->burstHelper = burst_helper;
+
+            assert(!readQueueFull(1));
+            rdQLenPdf[readQueue.size() + respQueue.size()]++;
+            // ADARSH Increment cpu read Q len Pdf
+            if (pkt->req->contextId() != 31)
+                cpurdQLenPdf[readQueue.size() + respQueue.size()]++;
+
+            DPRINTF(DRAMCache, "Adding to read queue addr\n");
+
+            readQueue.push_back(dram_pkt);
+
+            // Update stats
+            avgRdQLen = readQueue.size() + respQueue.size();
+        }
+
+        // Starting address of next dram pkt (aligend to burstSize boundary)
+        // addr = (addr | (burstSize - 1)) + 1;
+        addr = addr + 1;
+    }
+
+    // If all packets are serviced by write queue, we send the repsonse back
+    if (pktsServicedByWrQ == pktCount) {
+        accessAndRespond(pkt, frontendLatency);
+        return;
+    }
+
+    // Update how many split packets are serviced by write queue
+    if (burst_helper != NULL)
+        burst_helper->burstsServiced = pktsServicedByWrQ;
+
+    // If we are not already scheduled to get a request out of the
+    // queue, do so now
+    if (!nextReqEvent.scheduled()) {
+        DPRINTF(DRAMCache, "Request scheduled immediately\n");
+        schedule(nextReqEvent, curTick());
+    }
+}
+
+void
+DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
+{
+    // only add to the write queue here. whenever the request is
+    // eventually done, set the readyTime, and call schedule()
+    assert(pkt->isWrite());
+
+    // if the request size is larger than burst size, the pkt is split into
+    // multiple DRAM packets
+    Addr addr = pkt->getAddr();
+
+    // ADARSH calcuating DRAM cache address here
+	addr = addr / dramCache_block_size;
+	addr = addr % dramCache_num_sets;
+	// ADARSH packet count is 5; we need to number our sets in multiplies of 5
+	addr = addr * pktCount;
+
+	PacketPtr pkt_copy = new Packet(pkt,false,false);
+
+    for (int cnt = 0; cnt < pktCount; ++cnt) {
+        unsigned size = burstSize;
+
+        writePktSize[ceilLog2(size)]++;
+        writeBursts++;
+
+        // see if we can merge with an existing item in the write
+        // queue and keep track of whether we have merged or not
+        bool merged = isInWriteQueue.find(addr) !=
+            isInWriteQueue.end();
+
+        // if the item was not merged we need to create a new write
+        // and enqueue it
+        if (!merged) {
+            DRAMPacket* dram_pkt = decodeAddr(pkt_copy, addr, size, false);
+
+            assert(writeQueue.size() < writeBufferSize);
+            wrQLenPdf[writeQueue.size()]++;
+            // ADARSH Increment cpuwrite queue len
+            if (pkt->req->contextId() != 31)
+                cpuwrQLenPdf[writeQueue.size()]++;
+
+            DPRINTF(DRAMCache, "Adding to write queue\n");
+
+            writeQueue.push_back(dram_pkt);
+            isInWriteQueue.insert(addr);
+            //DPRINTF(DRAMCache, "writeQueue size - %d\n", writeQueue.size());
+            //DPRINTF(DRAMCache, "isInWriteQueue size - %d\n", isInWriteQueue.size());
+            assert(writeQueue.size() == isInWriteQueue.size());
+
+            // Update stats
+            avgWrQLen = writeQueue.size();
+        } else {
+            DPRINTF(DRAMCache, "Merging write burst with existing queue entry\n");
+
+            // keep track of the fact that this burst effectively
+            // disappeared as it was merged with an existing one
+            mergedWrBursts++;
+        }
+
+        // Starting address of next dram pkt (aligend to burstSize boundary)
+        addr = addr + 1;
+    }
+
+    // we do not wait for the writes to be send to the actual memory,
+    // but instead take responsibility for the consistency here and
+    // snoop the write queue for any upcoming reads
+    // @todo, if a pkt size is larger than burst size, we might need a
+    // different front end latency
+
+    // TODO WE NEED TO THINK ABOUT THIS! IS THIS THE RIGHT PLACE TO WRITE
+    // TO BACKING STORE
+    // my thought: write arrives at D$, successfully writes to backing store immediately
+    // but we dont know if it will be a hit or a miss since we have not read tag
+    // if miss, read req goes to memory and returns; don't perform any action then
+    // if hit , all good
+    accessAndRespond(pkt, frontendLatency);
+
+    // If we are not already scheduled to get a request out of the
+    // queue, do so now
+    if (!nextReqEvent.scheduled()) {
+        DPRINTF(DRAMCache, "Request scheduled immediately\n");
+        schedule(nextReqEvent, curTick());
+    }
+}
+
 bool
 DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 {
@@ -391,9 +876,9 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 
 	// This is where we enter from the outside world
 	DPRINTF(DRAMCache,
-			"ADARSH recvTimingReq: request %s addr %lld size %d, ContextId: %d Threadid: %d\n",
-			pkt->cmdString(), pkt->getAddr(), pkt->getSize(), pkt->req->contextId(),
-			pkt->req->threadId());
+			"%s: request %s addr %lld size %d, ContextId: %d Threadid: %d\n",
+			__func__, pkt->cmdString(), pkt->getAddr(), pkt->getSize(),
+			pkt->req->contextId(), pkt->req->threadId());
 
 	// simply drop inhibited packets and clean evictions
 	if (pkt->memInhibitAsserted () || pkt->cmd == MemCmd::CleanEvict)
@@ -417,7 +902,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 
 	// do prediction using predictorTable to perform SAM or PAM
 	// operation is as follows: check MSHR hit or miss
-	// start DRAMCache access; check hit or miss
+	// start DRAMCache access; verify with tag if hit or miss
 	// if miss send fill request, add to MSHR
 	// don't remove cache conflict line till fill req returns
 	// once fill req returns, remove from MSHR, alloc cache block
@@ -425,19 +910,26 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// once wb ack is received, remove from writeBuffer
 
 	// perform prediction using cache address; lookup RubyPort::predictorTable
-	Addr alignedAddr = pkt->getAddr() & ~(Addr(128 - 1));
-	DPRINTF(DRAMCache,"PC for addr: %d\n",RubyPort::pcTable[alignedAddr]);
+	int cid = pkt->req->contextId();
+	Addr blk_addr = blockAlign (pkt->getAddr ());
+	Addr pc = RubyPort::pcTable[cid][blk_addr];
+	DPRINTF(DRAMCache,"PC %d for addr: %d\n",pc, blk_addr);
 
-	RubyPort::mruPcAddrList.remove(alignedAddr);
-	RubyPort::mruPcAddrList.push_front(alignedAddr);
+	// adjust mruPcAddrList to keep it in MRU
+	RubyPort::mruPcAddrList[cid].remove(blk_addr);
+	RubyPort::mruPcAddrList[cid].push_front(blk_addr);
 
-	DPRINTF(DRAMCache,"begin of lruAddrList\n");
-	for (auto it=RubyPort::mruPcAddrList.begin(); it!=RubyPort::mruPcAddrList.end(); ++it)
-			DPRINTF(DRAMCache,"%d\n",*it);
-	DPRINTF(DRAMCache,"end of mruPcAddrList\n");
+	// do prediction here and decide if this access should be SAM or PAM
+	if (predict(pc, cid) == false)
+	{
+		// predicted as miss do PAM
+		// create an entry in MSHR and which will send a request to memory
+		/* The MSHR needs to hold some meta data to identify if this request was
+		   a PAM  or an actual SAM miss so when the resp arrives we can identify
+		   what action to take */
+	}
 
 	// ADARSH check MSHR if there is outstanding request for this address
-	Addr blk_addr = blockAlign (pkt->getAddr ());
 	MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
 	if (mshr)
 	{
@@ -479,8 +971,10 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// translates to only one dram packet. Otherwise, a pkt translates to
 	// multiple dram packets
 	unsigned size = pkt->getSize ();
-	unsigned offset = pkt->getAddr () & (burstSize - 1);
-	unsigned int dram_pkt_count = divCeil (offset + size, burstSize);
+	//unsigned offset = pkt->getAddr () & (burstSize - 1);
+	//unsigned int dram_pkt_count = divCeil (offset + size, burstSize);
+	// ADARSH i know i need 5 burts for TAD; 4 for data and 1 for tag
+	unsigned int dram_pkt_count = 5;
 
 	// check local buffers and do not accept if full
 	if (pkt->isRead ())
@@ -586,9 +1080,39 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 	MSHR::Target *initial_tgt = mshr->getTarget ();
 
 	// find the cache block, set id and tag
-	//unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
-	//unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-	//unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+	// fix the tag entry now that memory access has returned
+	unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
+	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+
+	if (!set[cacheSet].valid)
+	{
+		// cold miss - the set was not valid
+		set[cacheSet].tag = cacheTag;
+		set[cacheSet].dirty = false;
+		set[cacheSet].valid = true;
+	}
+	else if (set[cacheSet].tag == cacheTag)
+	{
+		// predictor could have possibly sent out a PAM request incorrectly
+		// discard this and do nothing to tag directory
+	}
+	else if (set[cacheSet].tag != cacheTag)
+	{
+		Addr evictAddr = set[cacheSet].tag * dramCache_num_sets * dramCache_block_size;
+		DPRINTF(DRAMCache, "Evicting addr %d in cacheSet %d\n", evictAddr ,cacheSet);
+		// this block needs to be evicted
+		if (set[cacheSet].dirty)
+		{
+			// TODO write back needed as this line is dirty
+			// allocate writeBuffer for this block
+			// reconstruct address from tag and set
+		}
+
+		// change the tag directory
+		set[cacheSet].tag = cacheTag;
+		set[cacheSet].dirty = false;
+	}
 
 	Tick miss_latency = curTick () - initial_tgt->recvTime;
 	if (pkt->req->contextId () == 31)
@@ -603,12 +1127,13 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 
 		if (tgt_pkt->cmd == MemCmd::WriteReq)
 		{
-			// if the original packet was a write request
+			// wont be a problem here actually because DRAM writes to backing store
+			warn("unimplemented write req resp %d", pkt->getAddr());
 		}
 		tgt_pkt->makeTimingResponse ();
-		Tick completetion_time = pkt->headerDelay;
+		Tick completion_time = curTick() + pkt->headerDelay;
 		tgt_pkt->headerDelay = tgt_pkt->payloadDelay = 0;
-		port.schedTimingResp (tgt_pkt, completetion_time);
+		port.schedTimingResp (tgt_pkt, completion_time);
 
 		mshr->popTarget ();
 	}
@@ -684,6 +1209,12 @@ DRAMCacheCtrl::regStats ()
 	dramCache_max_gpu_dirty_lines.name (name () + ".dramCache_max_gpu_dirty_lines").desc (
 			"maximum number of gpu dirty lines in cache");
 
+	dramCache_total_pred.name ( name() + ".dramCache_total_pred").desc(
+			"total number of predictions made");
+
+	dramCache_incorrect_pred.name ( name() + ".dramCache_incorrect_pred").desc(
+				"Number of incorrect predictions");
+
 	dramCache_mshr_miss_latency.init (2).name (
 			name () + ".dramCache_mshr_miss_latency").desc (
 					"total miss latency of mshr for cpu and gpu");
@@ -726,6 +1257,11 @@ DRAMCacheCtrl::regStats ()
 			/ ((dramCache_read_hits + dramCache_write_hits) - dramCache_cpu_hits)
 			+ ((dramCache_read_misses + dramCache_write_misses)
 					- dramCache_cpu_misses);
+
+	dramCache_correct_pred.name ( name() + "dramCache_correct_pred").desc (
+			"Number of correct predictions");
+
+	dramCache_correct_pred = dramCache_total_pred - dramCache_incorrect_pred;
 
 	blocked_cycles.init (NUM_BLOCKED_CAUSES);
 	blocked_cycles.name (name () + ".blocked_cycles").desc (
@@ -825,14 +1361,24 @@ DRAMCacheCtrl::getTimingPacket ()
 	PacketPtr tgt_pkt = mshr->getTarget ()->pkt;
 	PacketPtr pkt;
 
-	DPRINTF(DRAMCache, "%s %s for addr %d size %d isFowardNoResponse %d\n",
+	DPRINTF(DRAMCache, "%s %s for addr %d size %d isFowardNoResponse %d mshr index %d\n",
 			__func__, tgt_pkt->cmdString(), tgt_pkt->getAddr(),
-			tgt_pkt->getSize(), mshr->isForwardNoResponse());
+			tgt_pkt->getSize(), mshr->isForwardNoResponse(), (mshr->queue->index - 1));
 
 	// set the command as readReq if it was MSHR else writeReq if it was writeBuffer
 	MemCmd cmd = (mshr->queue->index - 1) ? MemCmd::ReadReq : MemCmd::WriteReq;
 
-	pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);
+	//if read request copy packet else write request create new packet and setData
+	if(cmd == MemCmd::ReadReq)
+		pkt = new Packet (tgt_pkt, false, true);
+	else
+	{
+		pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);
+		pkt->setData(tgt_pkt->getConstPtr<uint8_t>());
+	}
+
+	DPRINTF(DRAMCache, "MSHR packet: %d", tgt_pkt->print());
+	DPRINTF(DRAMCache, "new packet: %d", pkt->print());
 	pkt->senderState = mshr;
 
 	return pkt;
@@ -879,3 +1425,39 @@ DRAMCacheCtrl::DRAMCacheReqPacketQueue::sendDeferredPacket ()
 	}
 
 }
+
+uint64_t DRAMCacheCtrl::hash_pc (Addr pc)
+{
+	// folded xor as in http://www.jilp.org/cbp/Pierre.pdf
+	uint64_t hash_pc = pc;
+	for( int k = 1; k<8; k++)
+		hash_pc ^= (pc>>(k*8));
+	// mask higher order bits
+	hash_pc = hash_pc & 0x00000000000000ff;
+
+	return hash_pc;
+}
+
+// returns true for hit and false for miss
+bool DRAMCacheCtrl::predict(ContextID contextId, Addr pc)
+{
+	if(predictor[contextId][hash_pc(pc)]>3)
+		return false;
+	else
+		return true;
+}
+
+void
+DRAMCacheCtrl::decMac(ContextID contextId, Addr pc)
+{
+	if(predictor[contextId][hash_pc(pc)]!=0)
+		predictor[contextId][hash_pc(pc)]--;
+}
+
+void
+DRAMCacheCtrl::incMac(ContextID contextId, Addr pc)
+{
+	if(predictor[contextId][hash_pc(pc)]!=8)
+		predictor[contextId][hash_pc(pc)]++;
+}
+

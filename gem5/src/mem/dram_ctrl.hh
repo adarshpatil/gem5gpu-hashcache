@@ -495,7 +495,7 @@ class DRAMCtrl : public AbstractMemory
      * processRespondEvent is called; no parameters are allowed
      * in these methods
      */
-    void processNextReqEvent();
+    virtual void processNextReqEvent();
     EventWrapper<DRAMCtrl,&DRAMCtrl::processNextReqEvent> nextReqEvent;
 
     virtual void processRespondEvent();
@@ -531,7 +531,7 @@ class DRAMCtrl : public AbstractMemory
      * translate to. If pkt size is larger then one full burst,
      * then pktCount is greater than one.
      */
-    void addToReadQueue(PacketPtr pkt, unsigned int pktCount);
+    virtual void addToReadQueue(PacketPtr pkt, unsigned int pktCount);
 
     /**
      * Decode the incoming pkt, create a dram_pkt and push to the
@@ -544,7 +544,7 @@ class DRAMCtrl : public AbstractMemory
      * translate to. If pkt size is larger then one full burst,
      * then pktCount is greater than one.
      */
-    void addToWriteQueue(PacketPtr pkt, unsigned int pktCount);
+    virtual void addToWriteQueue(PacketPtr pkt, unsigned int pktCount);
 
     /**
      * Actually do the DRAM access - figure out the latency it

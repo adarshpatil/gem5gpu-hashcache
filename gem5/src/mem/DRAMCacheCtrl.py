@@ -25,6 +25,8 @@ class DRAMCacheCtrl(DRAMCtrl):
     demand_mshr_reserve = Param.Unsigned(1, "MSHRs reserved for demand access")
     tgts_per_mshr = Param.Unsigned(16,"Max number of accesses per MSHR")
     
+    num_cores = Param.Unsigned("Number of CPU cores in the system")
+    
 # A single DDR3-1600 x64 channel (one command and address bus), with
 # timings based on a DDR3-1600 4 Gbit datasheet (Micron MT41J512M8) in
 # an 8x8 configuration.
@@ -183,12 +185,12 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     tREFI = '3.9us'
 
     # Set default controller parameters
-    page_policy = 'close'
+    page_policy = 'open_adaptive'
     # write_buffer_size = 8
     # read_buffer_size = 8
     # ADARSH Since we double both num of layers and size of each layer, we x4 buffer sizes
-    write_buffer_size = 32
-    read_buffer_size = 32
+    write_buffer_size = 40
+    read_buffer_size = 40
     addr_mapping = 'RoCoRaBaCh'
     min_writes_per_switch = 8
 

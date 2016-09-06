@@ -113,6 +113,10 @@ class DRAMCacheCtrl : public DRAMCtrl
 		virtual bool isSnooping() const { return false; }
 	};
 
+	std::deque<DRAMPacket*> dramPktWriteRespQueue;
+	void processRespondWriteEvent();
+	EventWrapper<DRAMCacheCtrl, &DRAMCacheCtrl::processRespondWriteEvent> respondWriteEvent;
+
 	DRAMCacheMasterPort dramCache_masterport;
 
 	MSHRQueue mshrQueue;
@@ -144,6 +148,20 @@ class DRAMCacheCtrl : public DRAMCtrl
      */
     uint8_t blocked;
 
+    int num_cores; //num of CPU cores in the system, needed for per core predictor
+
+    //  MAP-I PREDICTOR type goes here
+
+    // alloy cache - memory access counter saturating 3 bit counter
+    // takes values between 0 to 7
+    // for prediction only MSB bit considered, hence < 3 miss; > 3 hit
+    typedef uint8_t mac;
+
+    // predictor; hash of PC to mac - indexed by folded xor hash of PC
+    typedef std::map <unsigned int, mac> predictorTable;
+    // per core predictor
+    static std::map<int, predictorTable> predictor;
+
     //since assoc is 1 - set = way
 	struct dramCacheSet_t
 	{
@@ -168,9 +186,9 @@ class DRAMCacheCtrl : public DRAMCtrl
 	    bool     valid;
 	    bool     dirty;
 	    // cache sub-block counters
-	    bool     *used; // a bit per each cache block sized chunk in the line to denote usage
-	    uint64_t *written; // counter for each cache block write count
-	    uint64_t *accessed; // counter for each cache block access count
+	    //bool     *used; // a bit per each cache block sized chunk in the line to denote usage
+	    //uint64_t *written; // counter for each cache block write count
+	    //uint64_t *accessed; // counter for each cache block access count
 	    //uint64_t *read_after_write; // counter for each cache block that was read after being written
 	    //uint64_t *write_after_write; // counter for each cache block that was read after being written
 	};
@@ -198,6 +216,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_cpu_writebuffer_hits;
 	Stats::Scalar dramCache_max_gpu_dirty_lines; // we need to find the size of dirty line structure
 	Stats::Vector dramCache_mshr_miss_latency; // Total cycle latency of MSHR [0]-cpu [1]-gpu
+	Stats::Scalar dramCache_total_pred; // number of predictions made
+	Stats::Scalar dramCache_incorrect_pred; // number of miss predictions by predictor
 
 	Stats::Formula dramCache_hit_rate;
 	Stats::Formula dramCache_rd_hit_rate;
@@ -205,6 +225,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Formula dramCache_evict_rate;
 	Stats::Formula dramCache_cpu_hit_rate;
 	Stats::Formula dramCache_gpu_hit_rate;
+	// correct predictions = total num predictions - incorrect predictions
+	Stats::Formula dramCache_correct_pred;
 
     /** The total number of cycles blocked for each blocked cause. */
     Stats::Vector blocked_cycles;
@@ -214,13 +236,12 @@ class DRAMCacheCtrl : public DRAMCtrl
     DRAMCacheCtrl(const DRAMCacheCtrlParams* p);
 
     ~DRAMCacheCtrl() {
-        int i;
         if (set) {
-            for (i=0;i<num_sub_blocks_per_way;i++){
-                delete set[i].used;
-                delete set[i].written;
-                delete set[i].accessed;
-            }
+            //for (int i=0;i<num_sub_blocks_per_way;i++){
+            //    delete set[i].used;
+            //    delete set[i].written;
+            //    delete set[i].accessed;
+            //}
             delete [] set;
         }
         set=NULL;
@@ -361,12 +382,24 @@ class DRAMCacheCtrl : public DRAMCtrl
 	                               bool isRead);
     void regStats();
 
+    void processNextReqEvent();
+
     void processRespondEvent();
 
     Tick recvAtomic(PacketPtr pkt);
+
+    void addToReadQueue(PacketPtr pkt, unsigned int pktCount);
+    void addToWriteQueue(PacketPtr pkt, unsigned int pktCount);
+
     bool recvTimingReq(PacketPtr pkt);
 
     void recvTimingResp(PacketPtr pkt);
+
+    // predictor functions
+    uint64_t hash_pc (Addr pc);
+    bool predict(ContextID contextId, Addr pc); // true for hit; false for miss
+    void incMac(ContextID contextId, Addr pc);
+    void decMac(ContextID contextId, Addr pc);
 };
 
 #endif //__MEM_DRAMCACHE_CTRL_HH__

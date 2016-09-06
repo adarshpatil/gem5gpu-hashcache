@@ -133,7 +133,7 @@ for name, cls in inspect.getmembers(m5.objects, is_mem_class):
 for name, cls in inspect.getmembers(m5.objects, is_dramcache_class):
     _dramcache_classes[name] = cls
 
-def create_dramcache_ctrl(cls, r, i, nbr_mem_ctrls, dcache_size, dcache_assoc, dcache_block_size):
+def create_dramcache_ctrl(cls, r, i, nbr_mem_ctrls, dcache_size, dcache_assoc, dcache_block_size, num_cpus):
     """
     Helper function for creating DRAMCache controller from the given options
     This function is invoked from Ruby and dramcache is attached to memory
@@ -154,6 +154,8 @@ def create_dramcache_ctrl(cls, r, i, nbr_mem_ctrls, dcache_size, dcache_assoc, d
                                                     xor_low_bit + intlv_bits - 1,
                                                 intlvBits = intlv_bits,
                                                 intlvMatch = i)
+
+    dramcache_ctrl.num_cores = num_cpus
 
     return dramcache_ctrl
 

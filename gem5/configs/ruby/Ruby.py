@@ -117,7 +117,7 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
             dramcache_ctrl = MemConfig.create_dramcache_ctrl(
                 MemConfig.get_cache(options.dramcache_type), system.mem_ranges[0],
                 index, options.num_dirs, options.dramcache_size,
-                options.dramcache_assoc, options.dramcache_block_size)
+                options.dramcache_assoc, options.dramcache_block_size, options.num_cpus)
 
             mem_ctrls.append(dramcache_ctrl)
             dir_cntrl.memory = dramcache_ctrl.port
