@@ -575,11 +575,24 @@ void DRAMCacheCtrl::processRespondWriteEvent()
 			if (!isHit)  // miss send cache fill request
 			{
 				// send cache fill to master port - master port sends from MSHR
+				DPRINTF(DRAMCache,"allocate miss buffer for write request\n");
 				allocateMissBuffer (dram_pkt->pkt, tBURST, true);
 			}
 			else
 			{
-				delete dram_pkt->pkt;
+				// access has already happened in addtowriteQueue
+				// we now respond since know its a hit
+				PacketPtr respPkt = dram_pkt->pkt;
+				DPRINTF(DRAMCache,"Responding to address %d\n", respPkt->getAddr());
+				// packet should not be a response yet
+				assert(!respPkt->isResponse());
+				respPkt->makeResponse();
+
+				Tick response_time = curTick() + frontendLatency +
+						respPkt->headerDelay + respPkt->payloadDelay;
+				respPkt->headerDelay = respPkt->payloadDelay = 0;
+
+				port.schedTimingResp(respPkt, response_time);
 			}
 		}
 	}
@@ -865,7 +878,13 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
     // but we dont know if it will be a hit or a miss since we have not read tag
     // if miss, read req goes to memory and returns; don't perform any action then
     // if hit , all good
-    accessAndRespond(pkt, frontendLatency);
+    // accessAndRespond(pkt, frontendLatency);
+
+    // We decided to do access here which updates the backing store
+    // response will be sent later after we know hit or miss in processWriteResponseEvent
+    PacketPtr clone_pkt = new Packet (pkt, false, true);
+    access(clone_pkt);
+    delete clone_pkt;
 
     // If we are not already scheduled to get a request out of the
     // queue, do so now
@@ -1373,14 +1392,26 @@ DRAMCacheCtrl::getTimingPacket ()
 
 	DPRINTF(DRAMCache, "%s %s for addr %d size %d isFowardNoResponse %d mshr index %d\n",
 			__func__, tgt_pkt->cmdString(), tgt_pkt->getAddr(),
-			tgt_pkt->getSize(), mshr->isForwardNoResponse(), (mshr->queue->index - 1));
+			tgt_pkt->getSize(), mshr->isForwardNoResponse(), mshr->queue->index);
 
 	// set the command as readReq if it was MSHR else writeReq if it was writeBuffer
-	MemCmd cmd = (mshr->queue->index - 1) ? MemCmd::ReadReq : MemCmd::WriteReq;
+	MemCmd cmd = mshr->queue->index ? MemCmd::WriteReq : MemCmd::ReadReq;
 
 	//if read request copy packet else write request create new packet and setData
 	if(cmd == MemCmd::ReadReq)
-		pkt = new Packet (tgt_pkt, false, true);
+	{
+		//MSHR entry and a WriteReq
+		if(tgt_pkt->cmd == MemCmd::WriteReq)
+		{
+//			pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);
+			pkt = new Packet(tgt_pkt,false,true);
+			pkt->cmd = cmd;
+		}
+		//MSHR entry and a ReadReq
+		else
+			pkt = new Packet(tgt_pkt,false,true);
+	}
+	//WriteBuffer entry and a WritebackReq
 	else
 	{
 		pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);
