@@ -1196,7 +1196,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			assert(dummyRdPkt->isResponse());
 
 			// copy data returned from dummyRdPkt to pkt
-			memcpy(wbPkt->getPtr<uint8_t>(), dummyRdPkt->getConstPtr<uint8_t>(),
+			memcpy(wbPkt->getPtr<uint8_t>(), dummyRdPkt->getPtr<uint8_t>(),
 					dramCache_block_size);
 			delete dummyRdPkt;
 
@@ -1249,8 +1249,8 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 	else if(mshr->queue->index == 1)
 	{
 		DPRINTF(DRAMCache,"write back completed addr %d", pkt->getAddr());
+		mshr->popTarget ();
 		delete pkt->req;
-		delete pkt;
 	}
 
 	delete pkt;
@@ -1520,11 +1520,11 @@ DRAMCacheCtrl::getTimingPacket ()
 		else
 			pkt = new Packet(tgt_pkt,false,true);
 	}
-	//WriteBuffer entry and a WritebackReq
-	else
+	else //WriteBuffer entry and a WritebackReq
 	{
 		pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);
-		pkt->setData(tgt_pkt->getConstPtr<uint8_t>());
+		pkt->allocate();
+		pkt->setData(tgt_pkt->getPtr<uint8_t>());
 	}
 
 	DPRINTF(DRAMCache, "MSHR packet: %d", tgt_pkt->print());
