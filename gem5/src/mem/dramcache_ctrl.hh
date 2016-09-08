@@ -349,8 +349,6 @@ class DRAMCacheCtrl : public DRAMCtrl
     MSHR *allocateWriteBuffer(PacketPtr pkt, Tick time)
     {
         DPRINTF(DRAMCache,"Allocating write buffer for blkaddr %d size %d\n",blockAlign(pkt->getAddr()), dramCache_block_size);
-        // should only see clean evictions in a read-only cache
-        assert(pkt->cmd == MemCmd::CleanEvict);
         assert(pkt->isWrite() && !pkt->isRead());
         return allocateBufferInternal(&writeBuffer,
                                       blockAlign(pkt->getAddr()), dramCache_block_size,
