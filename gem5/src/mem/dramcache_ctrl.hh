@@ -405,7 +405,7 @@ class DRAMCacheCtrl : public DRAMCtrl
     void incMac(ContextID contextId, Addr pc);
     void decMac(ContextID contextId, Addr pc);
 
-    Addr regenerateBlkAddr(uint64_t cacheSet, uint64_t cacheTag)
+    Addr regenerateBlkAddr(uint64_t set, uint64_t tag);
 };
 
 #endif //__MEM_DRAMCACHE_CTRL_HH__
