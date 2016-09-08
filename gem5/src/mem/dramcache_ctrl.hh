@@ -249,6 +249,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     void init() M5_ATTR_OVERRIDE;
 
+    DrainState drain() M5_ATTR_OVERRIDE;
+
     BaseMasterPort &getMasterPort(const std::string &if_name,
                                   PortID idx = InvalidPortID);
 
@@ -318,8 +320,10 @@ class DRAMCacheCtrl : public DRAMCtrl
         }
 
         if (sched_send)
+        {
             // schedule the send
             schedMemSideSendEvent(time);
+        }
 
         return mshr;
     }
@@ -400,6 +404,8 @@ class DRAMCacheCtrl : public DRAMCtrl
     bool predict(ContextID contextId, Addr pc); // true for hit; false for miss
     void incMac(ContextID contextId, Addr pc);
     void decMac(ContextID contextId, Addr pc);
+
+    Addr regenerateBlkAddr(uint64_t cacheSet, uint64_t cacheTag)
 };
 
 #endif //__MEM_DRAMCACHE_CTRL_HH__

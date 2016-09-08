@@ -905,7 +905,8 @@ class DRAMCtrl : public AbstractMemory
 
     DRAMCtrl(const DRAMCtrlParams* p);
 
-    DrainState drain() M5_ATTR_OVERRIDE;
+    // ADARSH override this in DRAMCacheCtrl
+    virtual DrainState drain() M5_ATTR_OVERRIDE;
 
     virtual BaseSlavePort& getSlavePort(const std::string& if_name,
                                         PortID idx = InvalidPortID);

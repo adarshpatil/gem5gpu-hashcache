@@ -120,7 +120,6 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     # size of device
     # two banks per device with each bank 4MB [2]
     # ADARSH changed to 4 banks per device with each bank 4MB 
-    #device_size = '8MB'
     device_size = '16MB'
     
     # 1x32 configuration, 1 device with 32 TSVs [2]
@@ -200,3 +199,7 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     mshrs = 128
     demand_mshr_reserve = 1
     tgts_per_mshr = 16
+
+    write_high_thresh_perc = 50
+    write_low_thresh_perc = 25
+    min_writes_per_switch = 20
