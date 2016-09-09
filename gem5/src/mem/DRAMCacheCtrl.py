@@ -123,7 +123,9 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     device_size = '16MB'
     
     # 1x32 configuration, 1 device with 32 TSVs [2]
-    device_bus_width = 32
+    # device_bus_width = 32
+    # ADARSH changed device_bus_width to 64
+    device_bus_width = 64
 
     # HMC is a BL8 device [2]
     burst_length = 8

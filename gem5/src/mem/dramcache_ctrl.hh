@@ -117,6 +117,9 @@ class DRAMCacheCtrl : public DRAMCtrl
 	void processRespondWriteEvent();
 	EventWrapper<DRAMCacheCtrl, &DRAMCacheCtrl::processRespondWriteEvent> respondWriteEvent;
 
+	// holds Addr of requests that have been sent as PAM by predictor
+	std::unordered_set<Addr> pamQueue;
+
 	DRAMCacheMasterPort dramCache_masterport;
 
 	MSHRQueue mshrQueue;

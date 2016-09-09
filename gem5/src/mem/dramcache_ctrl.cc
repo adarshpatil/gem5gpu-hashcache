@@ -738,7 +738,7 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
-	// ADARSH packet count is 5; we need to number our sets in multiplies of 5
+	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
     unsigned pktsServicedByWrQ = 0;
@@ -841,7 +841,7 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
     // ADARSH calcuating DRAM cache address here
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
-	// ADARSH packet count is 5; we need to number our sets in multiplies of 5
+	// ADARSH packet count is ; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
 	BurstHelper* burst_helper = NULL;
@@ -1001,9 +1001,11 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	{
 		// predicted as miss do PAM
 		// create an entry in MSHR and which will send a request to memory
-		/* The MSHR needs to hold some meta data to identify if this request was
-		   a PAM  or an actual SAM miss so when the resp arrives we can identify
-		   what action to take */
+		// The MSHR needs to hold some meta data to identify if this request was
+		// a PAM  or an actual SAM miss so when the resp arrives we can identify
+		// what action to take
+		// instead of maintaing in MSHR we use pamQueue to track PAM requests
+
 	}
 
 	// ADARSH check MSHR if there is outstanding request for this address
@@ -1050,7 +1052,8 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	//unsigned offset = pkt->getAddr () & (burstSize - 1);
 	//unsigned int dram_pkt_count = divCeil (offset + size, burstSize);
 	// ADARSH i know i need 5 burts for TAD; 4 for data and 1 for tag
-	unsigned int dram_pkt_count = 5;
+	// we modified this to 2 bursts including tag
+	unsigned int dram_pkt_count = 2;
 
 	// check local buffers and do not accept if full
 	if (pkt->isRead ())
@@ -1248,7 +1251,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 	}
 	else if(mshr->queue->index == 1)
 	{
-		DPRINTF(DRAMCache,"write back completed addr %d", pkt->getAddr());
+		DPRINTF(DRAMCache,"write back completed addr %d\n", pkt->getAddr());
 		mshr->popTarget ();
 		delete pkt->req;
 	}
