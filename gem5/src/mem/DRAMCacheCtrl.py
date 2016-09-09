@@ -190,8 +190,8 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     # write_buffer_size = 8
     # read_buffer_size = 8
     # ADARSH Since we double both num of layers and size of each layer, we x4 buffer sizes
-    write_buffer_size = 40
-    read_buffer_size = 40
+    write_buffer_size = 32
+    read_buffer_size = 32
     addr_mapping = 'RoCoRaBaCh'
     min_writes_per_switch = 8
 
@@ -203,5 +203,5 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     tgts_per_mshr = 16
 
     write_high_thresh_perc = 50
-    write_low_thresh_perc = 25
-    min_writes_per_switch = 20
+    write_low_thresh_perc = 20
+    min_writes_per_switch = 10
