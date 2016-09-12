@@ -6,7 +6,6 @@ import os
 import subprocess
 import shutil
 import time
-from duplicity.gpginterface import Options
 try:
     import Queue as Queue
 except:
