@@ -146,6 +146,7 @@ take_cpt_cpu_insts_8c = [ 9889117449,
     ]
 
 cpt_common_config = '''--work-begin-checkpoint-count=1
+--max-checkpoints=1
 --caches
 --clusters=8
 --flush_kernel_end
@@ -329,6 +330,8 @@ for benchmark in run_mix:
 
     if args.dramcache:
         final_config = final_config + '\n--dramcache'
+        if args.run:
+            final_config = final_config + '\n--dramcache_timing'
 
     final_config = final_config + '\n--num-cpus=' + str(num_cores)
     final_config = final_config + '\n' + '--benchmark ' + benchmarks[benchmark]

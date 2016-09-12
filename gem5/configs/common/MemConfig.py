@@ -133,7 +133,8 @@ for name, cls in inspect.getmembers(m5.objects, is_mem_class):
 for name, cls in inspect.getmembers(m5.objects, is_dramcache_class):
     _dramcache_classes[name] = cls
 
-def create_dramcache_ctrl(cls, r, i, nbr_mem_ctrls, dcache_size, dcache_assoc, dcache_block_size, num_cpus):
+def create_dramcache_ctrl(cls, r, i, nbr_mem_ctrls, dcache_size, dcache_assoc, 
+                          dcache_block_size, num_cpus, dramcache_timing):
     """
     Helper function for creating DRAMCache controller from the given options
     This function is invoked from Ruby and dramcache is attached to memory
@@ -143,19 +144,25 @@ def create_dramcache_ctrl(cls, r, i, nbr_mem_ctrls, dcache_size, dcache_assoc, d
     dramcache_ctrl.conf_table_reported = False
     dramcache_ctrl.dramcache_size = m5.objects.MemorySize(dcache_size)
 
-    import math
-    intlv_low_bit = int(math.log(dcache_block_size, 2))
-    intlv_bits = int(math.log(nbr_mem_ctrls,2))
-    xor_low_bit = 20
-    dramcache_ctrl.range = m5.objects.AddrRange(r.start, size = r.size(),
-                                                intlvHighBit = \
-                                                    intlv_low_bit + intlv_bits - 1,
-                                                xorHighBit = \
-                                                    xor_low_bit + intlv_bits - 1,
-                                                intlvBits = intlv_bits,
-                                                intlvMatch = i)
+    # import math
+    #     intlv_low_bit = int(math.log(dcache_block_size, 2))
+    #     intlv_bits = int(math.log(nbr_mem_ctrls,2))
+    #     xor_low_bit = 20
+    #     dramcache_ctrl.range = m5.objects.AddrRange(r.start, size = r.size(),
+    #                                                 intlvHighBit = \
+    #                                                     intlv_low_bit + intlv_bits - 1,
+    #                                                 xorHighBit = \
+    #                                                     xor_low_bit + intlv_bits - 1,
+    #                                                 intlvBits = intlv_bits,
+    #                                                 intlvMatch = i)
+
+    # Memory system that is not in the global address map cannot be interleaved
+    # hence we create a addr range that is the full size of memory
+    # it is used as backing store
+    dramcache_ctrl.range = m5.objects.AddrRange(r.start, size = r.size())
 
     dramcache_ctrl.num_cores = num_cpus
+    dramcache_ctrl.dramcache_timing = dramcache_timing
 
     return dramcache_ctrl
 

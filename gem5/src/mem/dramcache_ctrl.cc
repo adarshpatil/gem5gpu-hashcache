@@ -27,7 +27,8 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	p->dramcache_replacement_scheme), totalRows (0), system_cache_block_size (
 	128), // hardcoded to 128
     num_sub_blocks_per_way (0), total_gpu_lines (0), total_gpu_dirty_lines (0), order (
-	0), numTarget (p->tgts_per_mshr), blocked (0), num_cores(p->num_cores)
+	0), numTarget (p->tgts_per_mshr), blocked (0), num_cores(p->num_cores),
+	dramCacheTimingMode(p->dramcache_timing)
 {
 	DPRINTF(DRAMCache, "DRAMCacheCtrl constructor\n");
 	DPRINTF(DRAMCache, "num cores %d \n ", num_cores);
@@ -113,7 +114,9 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		// HIT
 		if (pkt->req->contextId () == 31) // it is a GPU req
 		{
-			DPRINTF(DRAMCache, "GPU request %d is a %s hit\n", pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+			DPRINTF(DRAMCache, "GPU request %d is a %s hit\n",
+					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+
 			if (!set[cacheSet].isGPUOwned) // was CPU owned
 			{
 				set[cacheSet].isGPUOwned = true;
@@ -124,7 +127,9 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		}
 		else // not a GPU req - it is a CPU req
 		{
-			DPRINTF(DRAMCache, "CPU request %d is a %s hit\n", pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+			DPRINTF(DRAMCache, "CPU request %d is a %s hit\n",
+					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+
 			if (set[cacheSet].isGPUOwned) // was a GPU line before
 			{
 				set[cacheSet].isGPUOwned = false;
@@ -172,7 +177,9 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		// MISS
 		if (pkt->req->contextId () == 31) // it is a GPU req
 		{
-			DPRINTF(DRAMCache, "GPU request %d is a %s miss\n", pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+			DPRINTF(DRAMCache, "GPU request %d is a %s miss\n",
+					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+
 			if (set[cacheSet].valid) // valid line - causes eviction
 			{
 				dramCache_evicts++;
@@ -198,7 +205,9 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		}
 		else // it is a CPU req
 		{
-			DPRINTF(DRAMCache, "CPU request %d is a %s miss\n", pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+			DPRINTF(DRAMCache, "CPU request %d is a %s miss\n",
+					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+
 			dramCache_cpu_misses++;
 			if (set[cacheSet].valid)
 			{
@@ -550,7 +559,8 @@ DRAMCacheCtrl::processNextReqEvent()
     }
 }
 
-void DRAMCacheCtrl::processRespondWriteEvent()
+void
+DRAMCacheCtrl::processRespondWriteEvent()
 {
 	DPRINTF(DRAMCache,
 			"%s: Some req has reached its readyTime\n", __func__);
@@ -603,6 +613,8 @@ void DRAMCacheCtrl::processRespondWriteEvent()
 		PacketPtr respPkt = dram_pkt->pkt;
 		DPRINTF(DRAMCache,"Responding to single burst address %d\n",
 				respPkt->getAddr());
+
+		fatal("DRAMCache ctrl doesnt support single burst for write");
 
 		// packet should not be a response yet
 		assert(!respPkt->isResponse());
@@ -684,8 +696,10 @@ DRAMCacheCtrl::processRespondEvent ()
 	}
 	else
 	{
-		// it is not a split packet
-		accessAndRespond (dram_pkt->pkt, frontendLatency + backendLatency);
+        // ADARSH we should not reach here, no single burst
+		DPRINTF(DRAMCache,"single read packet dram_pkt addr: %d addr: %d\n",
+				dram_pkt->addr, dram_pkt->pkt->getAddr());
+		fatal("DRAMCache ctrl doesnt support single burst for read");
 	}
 
 	DRAMPacket* tmp = respQueue.front ();
@@ -942,6 +956,12 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
 bool
 DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 {
+	if(!dramCacheTimingMode)
+	{
+		accessAndRespond(pkt,frontendLatency);
+		return true;
+	}
+
 	/// @todo temporary hack to deal with memory corruption issues until
 	/// 4-phase transactions are complete
 	for (int x = 0; x < pendingDelete.size (); x++)
@@ -977,42 +997,22 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	}
 	prevArrival = curTick ();
 
-	// do prediction using predictorTable to perform SAM or PAM
 	// operation is as follows: check MSHR hit or miss
+	// do prediction using predictorTable to perform SAM or PAM
 	// start DRAMCache access; verify with tag if hit or miss
 	// if miss send fill request, add to MSHR
 	// don't remove cache conflict line till fill req returns
 	// once fill req returns, remove from MSHR, alloc cache block
 	// if conflict line is dirty - allocate writeBuffer and send for WB
 	// once wb ack is received, remove from writeBuffer
-
-	// perform prediction using cache address; lookup RubyPort::predictorTable
-	int cid = pkt->req->contextId();
-	Addr blk_addr = blockAlign (pkt->getAddr ());
-	Addr pc = RubyPort::pcTable[cid][blk_addr];
-	DPRINTF(DRAMCache,"PC %d for addr: %d\n",pc, blk_addr);
-
-	// adjust mruPcAddrList to keep it in MRU
-	RubyPort::mruPcAddrList[cid].remove(blk_addr);
-	RubyPort::mruPcAddrList[cid].push_front(blk_addr);
-
-	// do prediction here and decide if this access should be SAM or PAM
-	if (predict(pc, cid) == false)
-	{
-		// predicted as miss do PAM
-		// create an entry in MSHR and which will send a request to memory
-		// The MSHR needs to hold some meta data to identify if this request was
-		// a PAM  or an actual SAM miss so when the resp arrives we can identify
-		// what action to take
-		// instead of maintaing in MSHR we use pamQueue to track PAM requests
-
-	}
+	// this cache is non inclusive, so there could be write miss events
 
 	// ADARSH check MSHR if there is outstanding request for this address
+	Addr blk_addr = blockAlign(pkt->getAddr());
 	MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
 	if (mshr)
 	{
-		DPRINTF(DRAMCache, "%s coalescing MSHR for %s addr %#llx\n", __func__,
+		DPRINTF(DRAMCache, "%s coalescing MSHR for %s addr %#d\n", __func__,
 				pkt->cmdString(), pkt->getAddr());
 		dramCache_mshr_hits++;
 		if (pkt->req->contextId () != 31)
@@ -1034,7 +1034,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	mshr = writeBuffer.findMatch (blk_addr, false);
 	if (mshr && pkt->isRead())
 	{
-		DPRINTF(DRAMCache, "%s coalescing WriteBuffer for %s addr %#llx\n",
+		DPRINTF(DRAMCache, "%s servicing read using WriteBuffer for %s addr %#d\n",
 				__func__, pkt->cmdString(), pkt->getAddr());
 		dramCache_writebuffer_hits++;
 		if (pkt->req->contextId () != 31)
@@ -1042,6 +1042,32 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 
 		accessAndRespond(pkt, frontendLatency);
 		return true;
+	}
+
+	// perform prediction using cache address; lookup RubyPort::predictorTable
+	int cid = pkt->req->contextId();
+	Addr pc = RubyPort::pcTable[cid][blk_addr];
+	DPRINTF(DRAMCache,"PC %d for addr: %d\n",pc, blk_addr);
+
+	// adjust mruPcAddrList to keep it in MRU
+	RubyPort::mruPcAddrList[cid].remove(blk_addr);
+	RubyPort::mruPcAddrList[cid].push_front(blk_addr);
+
+	// do prediction here and decide if this access should be SAM or PAM
+	if (predict(pc, cid) == false)
+	{
+		// predicted as miss do PAM
+		// create an entry in MSHR and which will send a request to memory
+		// The MSHR needs to hold some meta data to identify if this request was
+		// a PAM  or an actual SAM miss so when the resp arrives we can identify
+		// what action to take
+
+		// instead of maintaining in MSHR we use pamQueue to track PAM requests
+		// pamQueue[blk_addr] = new pamReqStatus();
+		// create MSHR entry
+		// we are sure that MSHR entry doesn't exist for this address since if
+		// there was an MSHR it would have been coalesced above
+		// allocateMissBuffer(pkt,1,true);
 	}
 
 	// Find out how many dram packets a pkt translates to
@@ -1103,6 +1129,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	else
 	{
 		DPRINTF(DRAMCache, "Neither read nor write, ignore timing\n");
+		fatal("neither read not write\n");
 		neitherReadNorWrite++;
 		accessAndRespond (pkt, 1);
 	}
@@ -1158,70 +1185,70 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 
 	MSHR::Target *initial_tgt = mshr->getTarget ();
 
-	// find the cache block, set id and tag
-	// fix the tag entry now that memory access has returned
-	unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
-	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+	// write allocate policy - read resp do cache things
+	if(mshr->queue->index == 0 && pkt->isRead())
+	{
+		// find the cache block, set id and tag
+		// fix the tag entry now that memory access has returned
+		unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
+		unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+		unsigned int cacheTag = cacheBlock / dramCache_num_sets;
 
-	if (!set[cacheSet].valid)
-	{
-		// cold miss - the set was not valid
-		set[cacheSet].tag = cacheTag;
-		set[cacheSet].dirty = false;
-		set[cacheSet].valid = true;
-	}
-	else if (set[cacheSet].tag == cacheTag)
-	{
-		// predictor could have possibly sent out a PAM request incorrectly
-		// discard this and do nothing to tag directory
-	}
-	else if (set[cacheSet].tag != cacheTag)
-	{
-		Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-		DPRINTF(DRAMCache, "Evicting addr %d in cacheSet %d isClean %d\n",
-				evictAddr ,cacheSet, set[cacheSet].dirty);
-		// this block needs to be evicted
-		if (set[cacheSet].dirty)
+		if (!set[cacheSet].valid)
 		{
-			// write back needed as this line is dirty
-			// allocate writeBuffer for this block
-			// reconstruct address from tag and set
-			// we create a dummy read req and send to access() to get data
-			Request *req = new Request(evictAddr, dramCache_block_size, 0,
-							Request::wbMasterId);
-			PacketPtr dummyRdPkt = new Packet(req, MemCmd::ReadReq);
-			PacketPtr wbPkt = new Packet(req, MemCmd::WriteReq);
-			dummyRdPkt->allocate();
-			wbPkt->allocate();
+			// cold miss - the set was not valid
+			set[cacheSet].tag = cacheTag;
+			set[cacheSet].dirty = false;
+			set[cacheSet].valid = true;
+		}
+		else if (set[cacheSet].tag == cacheTag)
+		{
+			// predictor could have possibly sent out a PAM request incorrectly
+			// discard this and do nothing to tag directory
+		}
+		else if (set[cacheSet].tag != cacheTag)
+		{
+			Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
+			DPRINTF(DRAMCache, "Evicting addr %d in cacheSet %d isClean %d\n",
+					evictAddr ,cacheSet, set[cacheSet].dirty);
+			// this block needs to be evicted
+			if (set[cacheSet].dirty)
+			{
+				// write back needed as this line is dirty
+				// allocate writeBuffer for this block
+				// reconstruct address from tag and set
+				// we create a dummy read req and send to access() to get data
+				Request *req = new Request(evictAddr, dramCache_block_size, 0,
+								Request::wbMasterId);
+				PacketPtr dummyRdPkt = new Packet(req, MemCmd::ReadReq);
+				PacketPtr wbPkt = new Packet(req, MemCmd::WriteReq);
+				dummyRdPkt->allocate();
+				wbPkt->allocate();
 
-			access(dummyRdPkt);
-			assert(dummyRdPkt->isResponse());
+				access(dummyRdPkt);
+				assert(dummyRdPkt->isResponse());
 
-			// copy data returned from dummyRdPkt to pkt
-			memcpy(wbPkt->getPtr<uint8_t>(), dummyRdPkt->getPtr<uint8_t>(),
-					dramCache_block_size);
-			delete dummyRdPkt;
+				// copy data returned from dummyRdPkt to pkt
+				memcpy(wbPkt->getPtr<uint8_t>(), dummyRdPkt->getPtr<uint8_t>(),
+						dramCache_block_size);
+				delete dummyRdPkt;
 
-			allocateWriteBuffer(wbPkt,1);
+				allocateWriteBuffer(wbPkt,1);
+			}
+
+			// change the tag directory
+			set[cacheSet].tag = cacheTag;
+			set[cacheSet].dirty = false;
 		}
 
-		// change the tag directory
-		set[cacheSet].tag = cacheTag;
-		set[cacheSet].dirty = false;
-	}
+		Tick miss_latency = curTick () - initial_tgt->recvTime;
+		if (pkt->req->contextId () == 31)
+			dramCache_mshr_miss_latency[1] += miss_latency; //gpu mshr miss latency
+		else
+			dramCache_mshr_miss_latency[0] += miss_latency; //cpu mshr miss latency
 
-	Tick miss_latency = curTick () - initial_tgt->recvTime;
-	if (pkt->req->contextId () == 31)
-		dramCache_mshr_miss_latency[1] += miss_latency; //gpu mshr miss latency
-	else
-		dramCache_mshr_miss_latency[0] += miss_latency; //cpu mshr miss latency
+		Tick completion_time = curTick() + pkt->headerDelay;
 
-	Tick completion_time = curTick() + pkt->headerDelay;
-
-	// MSHR has targets
-	if(mshr->queue->index == 0)
-	{
 		while (mshr->hasTargets () && (mshr->queue->index == 0))
 		{
 			MSHR::Target *target = mshr->getTarget ();
@@ -1234,14 +1261,19 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 				// wont be a problem here actually because DRAM writes to backing store
 				//warn("unimplemented write req resp %d", pkt->getAddr());
 				DPRINTF(DRAMCache,"%s return from write miss\n", __func__);
-				accessAndRespond(tgt_pkt,completion_time);
+
+				set[cacheSet].dirty = true;
+				//Sending only response as access is already done during writeQ allocation
+				tgt_pkt->makeResponse();
+				port.schedTimingResp(tgt_pkt,completion_time);
+
 			}
 			else if (tgt_pkt->cmd == MemCmd::ReadReq)
 			{
 				DPRINTF(DRAMCache,"%s return from read miss\n", __func__);
 				tgt_pkt->setData(pkt->getConstPtr<uint8_t>());
 
-				tgt_pkt->makeTimingResponse ();
+				tgt_pkt->makeResponse ();
 				tgt_pkt->headerDelay = tgt_pkt->payloadDelay = 0;
 				port.schedTimingResp (tgt_pkt, completion_time);
 			}
@@ -1249,11 +1281,21 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			mshr->popTarget ();
 		}
 	}
-	else if(mshr->queue->index == 1)
+
+	else if(mshr->queue->index == 1 && pkt->isWrite())
 	{
+		// write buffer cannot coalesce assert if more than 1 target
+		assert(mshr->getNumTargets()==1);
 		DPRINTF(DRAMCache,"write back completed addr %d\n", pkt->getAddr());
+		delete mshr->getTarget ()->pkt;
 		mshr->popTarget ();
 		delete pkt->req;
+	}
+	else
+	{
+		// if MSHR and write or if WriteBuffer and read its fatal
+		// We should never reach here
+		fatal("DRAMCache doesn't understand this response");
 	}
 
 	delete pkt;
@@ -1579,7 +1621,8 @@ DRAMCacheCtrl::DRAMCacheReqPacketQueue::sendDeferredPacket ()
 
 }
 
-uint64_t DRAMCacheCtrl::hash_pc (Addr pc)
+uint64_t
+DRAMCacheCtrl::hash_pc (Addr pc)
 {
 	// folded xor as in http://www.jilp.org/cbp/Pierre.pdf
 	uint64_t hash_pc = pc;
@@ -1592,7 +1635,8 @@ uint64_t DRAMCacheCtrl::hash_pc (Addr pc)
 }
 
 // returns true for hit and false for miss
-bool DRAMCacheCtrl::predict(ContextID contextId, Addr pc)
+bool
+DRAMCacheCtrl::predict(ContextID contextId, Addr pc)
 {
 	if(predictor[contextId][hash_pc(pc)]>3)
 		return false;

@@ -27,6 +27,8 @@ class DRAMCacheCtrl(DRAMCtrl):
     
     num_cores = Param.Unsigned("Number of CPU cores in the system")
     
+    dramcache_timing = Param.Bool(False,"DRAMCache running in timing mode")
+
 # A single DDR3-1600 x64 channel (one command and address bus), with
 # timings based on a DDR3-1600 4 Gbit datasheet (Micron MT41J512M8) in
 # an 8x8 configuration.

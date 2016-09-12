@@ -244,6 +244,8 @@ def addCommonOptions(parser):
     parser.add_option("--list-dramcache-types", action="callback",
                       callback=_listDramcacheTypes,
                       help="List available DRAMCache types")
+    parser.add_option("--dramcache_timing", action="store_true", default=False,
+                      help="run DRAMCache in timing mode true/false")
 
 def addSEOptions(parser):
     # Benchmark options

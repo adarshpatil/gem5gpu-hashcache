@@ -16,6 +16,7 @@
 #include <deque>
 #include <string>
 #include <unordered_set>
+#include <map>
 
 #include "base/statistics.hh"
 #include "enums/AddrMap.hh"
@@ -118,7 +119,17 @@ class DRAMCacheCtrl : public DRAMCtrl
 	EventWrapper<DRAMCacheCtrl, &DRAMCacheCtrl::processRespondWriteEvent> respondWriteEvent;
 
 	// holds Addr of requests that have been sent as PAM by predictor
-	std::unordered_set<Addr> pamQueue;
+	typedef struct pamReqStatus
+	{
+		int isHit; // -1 initially; 0 miss; 1 hit
+		bool isPamComplete; // true if parallel memory request has returned
+		pamReqStatus()
+		{
+			isPamComplete = false;
+			isHit = -1;
+		}
+	}pamReqStatus;
+	std::map<Addr,pamReqStatus*> pamQueue;
 
 	DRAMCacheMasterPort dramCache_masterport;
 
@@ -198,6 +209,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 
 	struct dramCacheSet_t * set;
 
+	bool dramCacheTimingMode;
 	Stats::Scalar dramCache_read_hits;
 	Stats::Scalar dramCache_read_misses;
 	Stats::Scalar dramCache_write_hits;
@@ -343,7 +355,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     MSHR *allocateMissBuffer(PacketPtr pkt, Tick time, bool sched_send = true)
     {
-        DPRINTF(DRAMCache,"Allocating MSHR for blkaddr %d size %d\n",blockAlign(pkt->getAddr()), dramCache_block_size);
+        DPRINTF(DRAMCache,"Allocating MSHR for blkaddr %d size %d\n",
+                blockAlign(pkt->getAddr()), dramCache_block_size);
         return allocateBufferInternal(&mshrQueue,
                                       blockAlign(pkt->getAddr()), dramCache_block_size,
                                       pkt, time, sched_send);
@@ -351,7 +364,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     MSHR *allocateWriteBuffer(PacketPtr pkt, Tick time)
     {
-        DPRINTF(DRAMCache,"Allocating write buffer for blkaddr %d size %d\n",blockAlign(pkt->getAddr()), dramCache_block_size);
+        DPRINTF(DRAMCache,"Allocating write buffer for blkaddr %d size %d\n",
+                blockAlign(pkt->getAddr()), dramCache_block_size);
         assert(pkt->isWrite() && !pkt->isRead());
         return allocateBufferInternal(&writeBuffer,
                                       blockAlign(pkt->getAddr()), dramCache_block_size,
