@@ -6,6 +6,7 @@ import os
 import subprocess
 import shutil
 import time
+from duplicity.gpginterface import Options
 try:
     import Queue as Queue
 except:
@@ -51,7 +52,6 @@ parser.add_argument('--run', action='store_true', default=False,
 args = parser.parse_args()
 num_threads=int(args.threads)
 run_mix = args.run_mix.split(';')
-
 
 hsa = '/storage/adarsh/hsa'
 main_prefix = hsa + '/gem5gpu'
@@ -283,9 +283,9 @@ for benchmark in run_mix:
             max_insts = 125000000
             take_cpt_insts = take_cpt_cpu_insts_8c[int(benchmark[2:])-1]
 
-    if args.dramcache and int(args.memory) == '8':
+    if args.dramcache and (int(args.memory) == 8):
         suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-256ML3'
-    if args.dramcache and int(args.memory) == '16':
+    elif args.dramcache and (int(args.memory) == 16):
         suite_results_dir = results_dir + '/' + benchmark[0] + 'core-16G-512ML3'
     else:
         suite_results_dir = results_dir + '/' + benchmark[0] + 'core-' + args.memory + 'G-noL3'
@@ -305,7 +305,7 @@ for benchmark in run_mix:
             final_config = cpt_common_config
 
     ## 4cX benchmarks
-    if benchmark[1] == 'c':
+    elif benchmark[1] == 'c':
         if args.run:
             cpt_run_suffix = '.run'
             final_config = run_common_config_cpu + '\n--checkpoint-dir=' + suite_results_dir + '/'+ benchmark + '.cpt'
