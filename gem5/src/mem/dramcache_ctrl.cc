@@ -9,6 +9,7 @@
 #include "debug/DRAMCache.hh"
 #include "debug/Drain.hh"
 #include "mem/ruby/system/RubyPort.hh"
+#include "sim/system.hh"
 
 #include <algorithm>
 using namespace std;
@@ -18,20 +19,20 @@ map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
-	dramCache_masterport (name () + ".dramcache_masterport",*this), mshrQueue (
-	"MSHRs", p->mshrs, 4, p->demand_mshr_reserve, MSHRQueue_MSHRs), writeBuffer (
-	"write buffer", p->write_buffers, p->mshrs + 1000, 0,
-	MSHRQueue_WriteBuffer), dramCache_size (p->dramcache_size), dramCache_assoc (
-	p->dramcache_assoc), dramCache_block_size (p->dramcache_block_size), dramCache_access_count (
-	0), dramCache_num_sets (0), replacement_scheme (
-	p->dramcache_replacement_scheme), totalRows (0), system_cache_block_size (
-	128), // hardcoded to 128
-    num_sub_blocks_per_way (0), total_gpu_lines (0), total_gpu_dirty_lines (0), order (
-	0), numTarget (p->tgts_per_mshr), blocked (0), num_cores(p->num_cores),
+	dramCache_masterport (name () + ".dramcache_masterport",*this),
+	mshrQueue ("MSHRs", p->mshrs, 4, p->demand_mshr_reserve, MSHRQueue_MSHRs),
+	writeBuffer ("write buffer", p->write_buffers, p->mshrs + 1000, 0,
+	MSHRQueue_WriteBuffer), dramCache_size (p->dramcache_size),
+	dramCache_assoc (p->dramcache_assoc),
+	dramCache_block_size (p->dramcache_block_size),
+	dramCache_access_count (0), dramCache_num_sets (0),
+	replacement_scheme (p->dramcache_replacement_scheme), totalRows (0),
+	system_cache_block_size (128), // hardcoded to 128
+    num_sub_blocks_per_way (0), total_gpu_lines (0), total_gpu_dirty_lines (0),
+	order (0), numTarget (p->tgts_per_mshr), blocked (0), num_cores(p->num_cores),
 	dramCacheTimingMode(p->dramcache_timing)
 {
 	DPRINTF(DRAMCache, "DRAMCacheCtrl constructor\n");
-	DPRINTF(DRAMCache, "num cores %d \n ", num_cores);
 	// determine the dram actual capacity from the DRAM config in Mbytes
 	uint64_t deviceCapacity = deviceSize / (1024 * 1024) * devicesPerRank
 			* ranksPerChannel;
@@ -48,19 +49,21 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 
 	num_sub_blocks_per_way = dramCache_block_size / system_cache_block_size;
 
-	DPRINTF(
-			DRAMCache,
-			"DRAMCache totalRows:%d columnsPerStripe:%d, channels:%d, banksPerRank:%d, ranksPerChannel:%d, columnsPerRowBuffer:%d, rowsPerBank:%d, burstSize:%d\n",
+	DPRINTF(DRAMCache,
+			"DRAMCache totalRows:%d columnsPerStripe:%d, channels:%d, "
+			"banksPerRank:%d, ranksPerChannel:%d, columnsPerRowBuffer:%d, "
+			"rowsPerBank:%d, burstSize:%d\n",
 			totalRows, columnsPerStripe, channels, banksPerRank, ranksPerChannel,
 			columnsPerRowBuffer, rowsPerBank, burstSize);
 
+	DPRINTF(DRAMCache,"dramCacheTimingMode %d\n", dramCacheTimingMode);
 	// columsPerRowBuffer is actually rowBufferSize/burstSize => each column is 1 burst
 	// rowBufferSize = devicesPerRank * deviceRowBufferSize
 	//    for DRAM Cache devicesPerRank = 1 => rowBufferSize = deviceRowBufferSize = 2kB
 	//    for DDR3 Mem   devicesPerRank = 8 => 8kB
 	// DRAMCache totalRows = 64k
 	// DRAMCache sets = 960k
-	// Assoc is hard to increase but we can increase dramCache_block_size
+	// Assoc is hard to increase; increasing dramCache_block_size maybe tricky
 }
 
 void
@@ -560,7 +563,7 @@ DRAMCacheCtrl::processNextReqEvent()
 }
 
 void
-DRAMCacheCtrl::processRespondWriteEvent()
+DRAMCacheCtrl::processWriteRespondEvent()
 {
 	DPRINTF(DRAMCache,
 			"%s: Some req has reached its readyTime\n", __func__);
@@ -687,8 +690,9 @@ DRAMCacheCtrl::processRespondEvent ()
 
 				// @todo we probably want to have a different front end and back
 				// end latency for split packets
-				accessAndRespond (dram_pkt->pkt,
-						frontendLatency + backendLatency);
+				access (dram_pkt->pkt);
+				respond (dram_pkt->pkt, frontendLatency + backendLatency);
+
 				delete dram_pkt->burstHelper;
 				dram_pkt->burstHelper = NULL;
 			}
@@ -825,7 +829,8 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 
     // If all packets are serviced by write queue, we send the repsonse back
     if (pktsServicedByWrQ == pktCount) {
-        accessAndRespond(pkt, frontendLatency);
+        access(pkt);
+        respond(pkt, frontendLatency);
         return;
     }
 
@@ -958,7 +963,8 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 {
 	if(!dramCacheTimingMode)
 	{
-		accessAndRespond(pkt,frontendLatency);
+		access(pkt);
+		respond(pkt,frontendLatency);
 		return true;
 	}
 
@@ -1040,7 +1046,8 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		if (pkt->req->contextId () != 31)
 			dramCache_cpu_writebuffer_hits++;
 
-		accessAndRespond(pkt, frontendLatency);
+		access(pkt);
+		respond(pkt, frontendLatency);
 		return true;
 	}
 
@@ -1131,7 +1138,8 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		DPRINTF(DRAMCache, "Neither read nor write, ignore timing\n");
 		fatal("neither read not write\n");
 		neitherReadNorWrite++;
-		accessAndRespond (pkt, 1);
+		access(pkt);
+		respond(pkt, 1);
 	}
 
 	return true;
@@ -1403,7 +1411,7 @@ DRAMCacheCtrl::regStats ()
 					"total miss latency of mshr for cpu and gpu");
 
 	dramCache_gpu_occupancy_per_set.init (dramCache_num_sets).name (
-			name () + ".dramCache_gpu_occupancy_per_way").desc (
+			name () + ".dramCache_gpu_occupancy_per_set").desc (
 					"Number of times the way was occupied by GPU line");
 
 	dramCache_hit_rate.name (name () + ".dramCache_hit_rate").desc (
@@ -1662,4 +1670,25 @@ Addr
 DRAMCacheCtrl::regenerateBlkAddr(uint64_t set, uint64_t tag)
 {
 	return ((tag * dramCache_num_sets) + set) * dramCache_block_size;
+}
+
+void
+DRAMCacheCtrl::access(PacketPtr pkt)
+{
+	assert(pkt->isRequest());
+	system()->getPhysMem().access(pkt);
+
+}
+
+void
+DRAMCacheCtrl::respond(PacketPtr pkt, Tick latency)
+{
+	assert(pkt->isResponse());
+
+	Tick response_time = curTick() + latency + pkt->headerDelay
+			+ pkt->payloadDelay;
+
+	pkt->headerDelay = pkt->payloadDelay = 0;
+
+	port.schedTimingResp(pkt, response_time);
 }

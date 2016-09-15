@@ -114,9 +114,10 @@ class DRAMCacheCtrl : public DRAMCtrl
 		virtual bool isSnooping() const { return false; }
 	};
 
+
 	std::deque<DRAMPacket*> dramPktWriteRespQueue;
-	void processRespondWriteEvent();
-	EventWrapper<DRAMCacheCtrl, &DRAMCacheCtrl::processRespondWriteEvent> respondWriteEvent;
+	void processWriteRespondEvent();
+	EventWrapper<DRAMCacheCtrl, &DRAMCacheCtrl::processWriteRespondEvent> respondWriteEvent;
 
 	// holds Addr of requests that have been sent as PAM by predictor
 	typedef struct pamReqStatus
@@ -421,6 +422,9 @@ class DRAMCacheCtrl : public DRAMCtrl
     void decMac(ContextID contextId, Addr pc);
 
     Addr regenerateBlkAddr(uint64_t set, uint64_t tag);
+
+    void access(PacketPtr ptr);
+    void respond(PacketPtr ptr, Tick latency);
 };
 
 #endif //__MEM_DRAMCACHE_CTRL_HH__

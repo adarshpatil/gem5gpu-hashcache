@@ -1,5 +1,4 @@
 from m5.params import *
-from AbstractMemory import *
 from DRAMCtrl import *
 
 class DRAMCacheReplacementScheme(Enum): vals = ['lru', 'lruc', 'lrud']
@@ -188,7 +187,7 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     tREFI = '3.9us'
 
     # Set default controller parameters
-    page_policy = 'open_adaptive'
+    page_policy = 'close_adaptive'
     # write_buffer_size = 8
     # read_buffer_size = 8
     # ADARSH Since we double both num of layers and size of each layer, we x4 buffer sizes
@@ -204,6 +203,6 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     demand_mshr_reserve = 1
     tgts_per_mshr = 16
 
-    write_high_thresh_perc = 50
-    write_low_thresh_perc = 20
+    write_high_thresh_perc = 30
+    write_low_thresh_perc = 10
     min_writes_per_switch = 10

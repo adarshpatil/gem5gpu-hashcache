@@ -127,6 +127,8 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
 
         crossbar = None
         if len(system.mem_ranges) > 1:
+            # we dont support this
+            fatal("system mem_ranges greater than 1")
             crossbar = IOXBar()
             crossbars.append(crossbar)
             if options.dramcache:
