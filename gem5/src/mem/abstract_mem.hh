@@ -189,6 +189,9 @@ class AbstractMemory : public MemObject
 
   public:
 
+    // ADARSH is this the abstract memory for DRAMCache
+    bool isDRAMCache;
+
     typedef AbstractMemoryParams Params;
 
     AbstractMemory(const Params* p);

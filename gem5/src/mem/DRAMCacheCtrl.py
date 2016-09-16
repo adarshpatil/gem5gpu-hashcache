@@ -6,6 +6,8 @@ class DRAMCacheReplacementScheme(Enum): vals = ['lru', 'lruc', 'lrud']
 class DRAMCacheCtrl(DRAMCtrl):
     type = 'DRAMCacheCtrl'
     cxx_header = "mem/dramcache_ctrl.hh"
+
+    isDRAMCache = True;
     
     # Master Port to interface with main memory
     dramcache_masterport = MasterPort("Downstream master port to memory")

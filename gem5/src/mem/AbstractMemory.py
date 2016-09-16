@@ -61,3 +61,6 @@ class AbstractMemory(MemObject):
     # configuration information about the physical memory layout to
     # the kernel, e.g. using ATAG or ACPI
     conf_table_reported = Param.Bool(True, "Report to configuration table")
+
+    # ADARSH
+    isDRAMCache = Param.Bool(False, "is this a abstract memory for DRAMCache")

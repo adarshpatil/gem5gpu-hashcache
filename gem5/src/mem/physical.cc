@@ -110,8 +110,13 @@ PhysicalMemory::PhysicalMemory(const string& _name,
             // simply do it independently, also note that this kind of
             // memories are allowed to overlap in the logic address
             // map
-            vector<AbstractMemory*> unmapped_mems{m};
-            createBackingStore(m->getAddrRange(), unmapped_mems);
+            if( m->isDRAMCache == false) {
+				vector<AbstractMemory*> unmapped_mems{m};
+				createBackingStore(m->getAddrRange(), unmapped_mems);
+				DPRINTF(AddrRanges, "Creating backing store\n");
+            } else {
+                DPRINTF(AddrRanges, "DRAMCache hence not creating backing store\n");
+            }
         }
     }
 
