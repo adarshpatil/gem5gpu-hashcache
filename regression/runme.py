@@ -6,6 +6,7 @@ import os
 import subprocess
 import shutil
 import time
+import sys
 try:
     import Queue as Queue
 except:
@@ -47,6 +48,10 @@ parser.add_argument('--dramcache', action='store_true', default=False,
                     help='flag to run with predefined dramcache, default false')
 parser.add_argument('--run', action='store_true', default=False,
                     help='flag to run, else default to checkpoint')
+
+if not len(sys.argv)>1:
+  print parser.print_help()
+  sys.exit(1)
 
 args = parser.parse_args()
 num_threads=int(args.threads)
