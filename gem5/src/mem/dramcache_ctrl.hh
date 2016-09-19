@@ -15,7 +15,7 @@
 
 #include <deque>
 #include <string>
-#include <unordered_set>
+#include <set>
 #include <map>
 
 #include "base/statistics.hh"
@@ -153,6 +153,9 @@ class DRAMCacheCtrl : public DRAMCtrl
     uint64_t total_gpu_dirty_lines; // moving count of total dirty lines owned by GPU
     uint64_t order; // mshr needs order for some reason
     const int numTarget;
+
+    // addr, drampkt addr
+    std::set<std::pair<Addr, Addr>> isInWriteQueue;
 
     /** Stores time the cache blocked for statistics. */
     Cycles blockedCycle;

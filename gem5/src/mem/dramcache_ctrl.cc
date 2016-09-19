@@ -15,6 +15,7 @@
 using namespace std;
 using namespace Data;
 
+
 map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
@@ -514,7 +515,7 @@ DRAMCacheCtrl::processNextReqEvent()
         DPRINTF(DRAMCache, "writeQueue front being popped %d\n", dram_pkt->addr);
         DPRINTF(DRAMCache, "before size writeQueue:%d isInWriteQueue:%d\n", writeQueue.size(), isInWriteQueue.size());
         writeQueue.pop_front();
-        isInWriteQueue.erase(dram_pkt->addr);
+        isInWriteQueue.erase(make_pair(dram_pkt->pkt->getAddr(),dram_pkt->addr));
         DPRINTF(DRAMCache, "after size writeQueue:%d isInWriteQueue:%d\n", writeQueue.size(), isInWriteQueue.size());
         // delete dram_pkt; ADARSH we will delete this later in the call back
 
@@ -740,6 +741,9 @@ DRAMCacheCtrl::processRespondEvent ()
 void
 DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 {
+	// we dont do read coalescing because there could a write request
+	// between the 2 reads and may lead to read after write dependencies
+
     // only add to the read queue here. whenever the request is
     // eventually done, set the readyTime, and call schedule()
     assert(!pkt->isWrite());
@@ -778,7 +782,8 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
         Addr burst_addr = addr;
         // if the burst address is not present then there is no need
         // looking any further
-        if (isInWriteQueue.find(burst_addr) != isInWriteQueue.end()) {
+        if (isInWriteQueue.find(make_pair(pkt->getAddr(),burst_addr))
+                != isInWriteQueue.end()) {
             for (const auto& p : writeQueue) {
                 // check if the read is subsumed in the write queue
                 // packet we are looking at
@@ -902,7 +907,7 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
 		DPRINTF(DRAMCache, "Adding to write queue\n");
 
 		writeQueue.push_back(dram_pkt);
-		isInWriteQueue.insert(addr);
+		isInWriteQueue.insert(make_pair(pkt->getAddr(),addr));
 		//DPRINTF(DRAMCache, "writeQueue size - %d\n", writeQueue.size());
 		//DPRINTF(DRAMCache, "isInWriteQueue size - %d\n", isInWriteQueue.size());
 		assert(writeQueue.size() == isInWriteQueue.size());
@@ -1060,22 +1065,22 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	RubyPort::mruPcAddrList[cid].remove(blk_addr);
 	RubyPort::mruPcAddrList[cid].push_front(blk_addr);
 
+#if 0
 	// do prediction here and decide if this access should be SAM or PAM
 	if (predict(pc, cid) == false)
 	{
 		// predicted as miss do PAM
-		// create an entry in MSHR and which will send a request to memory
-		// The MSHR needs to hold some meta data to identify if this request was
-		// a PAM  or an actual SAM miss so when the resp arrives we can identify
-		// what action to take
+		// allocate in PAMQueue
+		// create an entry in MSHR, which will send a request to memory
 
-		// instead of maintaining in MSHR we use pamQueue to track PAM requests
-		// pamQueue[blk_addr] = new pamReqStatus();
+		// we use pamQueue to track PAM requests
+		pamQueue[blk_addr] = new pamReqStatus();
 		// create MSHR entry
 		// we are sure that MSHR entry doesn't exist for this address since if
 		// there was an MSHR it would have been coalesced above
-		// allocateMissBuffer(pkt,1,true);
+		allocateMissBuffer(pkt,1,true);
 	}
+#endif
 
 	// Find out how many dram packets a pkt translates to
 	// If the burst size is equal or larger than the pkt size, then a pkt
