@@ -608,7 +608,7 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
     pendingDelete.clear();
 
     // This is where we enter from the outside world
-    DPRINTF(DRAM, "ADARSH recvTimingReq: request %s addr %lld size %d, ContextId: %d Threadid: %d\n",
+    DPRINTF(DRAM, "recvTimingReq: request %s addr %lld size %d, ContextId: %d Threadid: %d\n",
             pkt->cmdString(), pkt->getAddr(), pkt->getSize(), pkt->req->contextId(), pkt->req->threadId());
 
     // simply drop inhibited packets and clean evictions

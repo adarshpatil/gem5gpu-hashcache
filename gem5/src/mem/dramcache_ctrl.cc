@@ -12,6 +12,10 @@
 #include "sim/system.hh"
 
 #include <algorithm>
+
+#define PREDICTION_LATENCY 5
+#undef MAPI_PREDICTOR
+
 using namespace std;
 using namespace Data;
 
@@ -26,6 +30,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	MSHRQueue_WriteBuffer), dramCache_size (p->dramcache_size),
 	dramCache_assoc (p->dramcache_assoc),
 	dramCache_block_size (p->dramcache_block_size),
+	dramCache_write_allocate(p->dramcache_write_allocate),
 	dramCache_access_count (0), dramCache_num_sets (0),
 	replacement_scheme (p->dramcache_replacement_scheme), totalRows (0),
 	system_cache_block_size (128), // hardcoded to 128
@@ -264,6 +269,31 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 	// don't worry about sending a fill request here, that will done elsewhere
 	assert(false);
 	return false;
+}
+
+void
+DRAMCacheCtrl::doWriteBack(Addr evictAddr)
+{
+	// write back needed as this line is dirty
+	// allocate writeBuffer for this block
+	// we create a dummy read req and send to access() to get data
+	Request *req = new Request(evictAddr, dramCache_block_size, 0,
+					Request::wbMasterId);
+	PacketPtr dummyRdPkt = new Packet(req, MemCmd::ReadReq);
+	PacketPtr wbPkt = new Packet(req, MemCmd::WriteReq);
+	dummyRdPkt->allocate();
+	wbPkt->allocate();
+
+	access(dummyRdPkt);
+	assert(dummyRdPkt->isResponse());
+
+	// copy data returned from dummyRdPkt to pkt
+	memcpy(wbPkt->getPtr<uint8_t>(), dummyRdPkt->getPtr<uint8_t>(),
+			dramCache_block_size);
+	delete dummyRdPkt;
+
+	allocateWriteBuffer(wbPkt,1);
+
 }
 
 DRAMCtrl::DRAMPacket*
@@ -581,35 +611,62 @@ DRAMCacheCtrl::processWriteRespondEvent()
 				== dram_pkt->burstHelper->burstCount)
 		{
 			// we have now serviced all children packets of a system packet
-
 			delete dram_pkt->burstHelper;
 			dram_pkt->burstHelper = NULL;
 
 			// Now access is complete, TAD unit available => doCacheLookup
 			bool isHit = doCacheLookup (dram_pkt->pkt);
 
-			if (!isHit)  // miss send cache fill request
+			if (!isHit)
 			{
-				// send cache fill to master port - master port sends from MSHR
-				DPRINTF(DRAMCache,"allocate miss buffer for write request\n");
-				allocateMissBuffer (dram_pkt->pkt, 1, true);
-			}
-			else
-			{
-				// access has already happened in addtowriteQueue
-				// we now respond since know its a hit
-				PacketPtr respPkt = dram_pkt->pkt;
-				DPRINTF(DRAMCache,"Responding to address %d\n", respPkt->getAddr());
-				// packet should not be a response yet
-				assert(!respPkt->isResponse());
-				respPkt->makeResponse();
+				// write miss we have the entire cache line
+				// if writeAllocate check the conflicting cache line
+			    //     if clean evict, change tag and make this line as dirty
+				//     if dirty put evicted line into writeBuffer, change tag and mark dirty
+				// if not writeAllocate
+				//     put entry for this line into writeBuffer
+				if (dramCache_write_allocate)
+				{
+					DPRINTF(DRAMCache, "write miss, write allocate\n");
+					// check conflicting line for clean or dirty
+					unsigned int cacheBlock = dram_pkt->pkt->getAddr()/dramCache_block_size;
+					unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+					unsigned int cacheTag = cacheBlock / dramCache_num_sets;
 
-				Tick response_time = curTick() + frontendLatency +
-						respPkt->headerDelay + respPkt->payloadDelay;
-				respPkt->headerDelay = respPkt->payloadDelay = 0;
-
-				port.schedTimingResp(respPkt, response_time);
+					if (set[cacheSet].dirty)
+					{
+						Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
+						doWriteBack(evictAddr);
+					}
+					else
+					{
+						// evicted cache line clean
+						set[cacheSet].tag = cacheTag;
+						set[cacheSet].dirty = true;
+					}
+				}
+				else
+				{
+					DPRINTF(DRAMCache, "write miss, write no allocate\n");
+					// we should copy the data into new packet
+					// the data set in the packet is dynamic data
+					// the constructor has allocated space but not copied data
+					PacketPtr pkt = new Packet(dram_pkt->pkt, false, true);
+					memcpy(pkt->getPtr<uint8_t>(), dram_pkt->pkt->getPtr<uint8_t>(),
+								dramCache_block_size);
+					allocateWriteBuffer(pkt,1);
+				}
 			}
+
+			// access has already happened in addtowriteQueue with clone_pkt
+			// we now respond irrespective of whether its a hit of a miss
+			PacketPtr respPkt = dram_pkt->pkt;
+			DPRINTF(DRAMCache,"Responding to address %d\n", respPkt->getAddr());
+			// packet should not be a response yet
+			assert(!respPkt->isResponse());
+			respPkt->makeResponse();
+
+			respond(respPkt, frontendLatency);
 		}
 	}
 	else
@@ -619,17 +676,6 @@ DRAMCacheCtrl::processWriteRespondEvent()
 				respPkt->getAddr());
 
 		fatal("DRAMCache ctrl doesnt support single burst for write");
-
-		// packet should not be a response yet
-		assert(!respPkt->isResponse());
-		respPkt->makeResponse();
-
-		Tick response_time = curTick() + frontendLatency +
-				respPkt->headerDelay + respPkt->payloadDelay;
-		respPkt->headerDelay = respPkt->payloadDelay = 0;
-
-		port.schedTimingResp(respPkt, response_time);
-
 	}
 
 
@@ -674,6 +720,10 @@ DRAMCacheCtrl::processRespondEvent ()
 		if (dram_pkt->burstHelper->burstsServiced
 				== dram_pkt->burstHelper->burstCount)
 		{
+			// we are done with burst helper
+			delete dram_pkt->burstHelper;
+			dram_pkt->burstHelper = NULL;
+
 			// we have now serviced all children packets of a system packet
 			// so we can now respond to the requester
 
@@ -693,10 +743,8 @@ DRAMCacheCtrl::processRespondEvent ()
 				// end latency for split packets
 				access (dram_pkt->pkt);
 				respond (dram_pkt->pkt, frontendLatency + backendLatency);
-
-				delete dram_pkt->burstHelper;
-				dram_pkt->burstHelper = NULL;
 			}
+
 		}
 	}
 	else
@@ -1008,21 +1056,31 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	}
 	prevArrival = curTick ();
 
-	// operation is as follows: check MSHR hit or miss
-	// do prediction using predictorTable to perform SAM or PAM
+	// operation is as follows: check MSHR/writeBuffer for hit or miss
+	// write cannot occur as a coalesce with MSHR/writeBuffer
+	// for read do prediction using predictorTable to perform SAM or PAM
 	// start DRAMCache access; verify with tag if hit or miss
-	// if miss send fill request, add to MSHR
+	// if read miss send fill request, add to MSHR
 	// don't remove cache conflict line till fill req returns
 	// once fill req returns, remove from MSHR, alloc cache block
 	// if conflict line is dirty - allocate writeBuffer and send for WB
 	// once wb ack is received, remove from writeBuffer
 	// this cache is non inclusive, so there could be write miss events
+	// if write miss check writeAlloc policy? evict line : alloc writeBuffer
 
 	// ADARSH check MSHR if there is outstanding request for this address
 	Addr blk_addr = blockAlign(pkt->getAddr());
 	MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
 	if (mshr)
 	{
+		if(pkt->cmd == MemCmd::WriteReq) {
+			// a write request can never coalesce with read req. Here is why
+			// write req means that some cache evicted the line out (writeback)
+			// the read request from another cache could have got the data from
+			// this cache via coherence not should not send the data to DRAMCache
+			fatal("DRAMCache got a write request coalescing with read");
+		}
+
 		DPRINTF(DRAMCache, "%s coalescing MSHR for %s addr %#d\n", __func__,
 				pkt->cmdString(), pkt->getAddr());
 		dramCache_mshr_hits++;
@@ -1065,9 +1123,9 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	RubyPort::mruPcAddrList[cid].remove(blk_addr);
 	RubyPort::mruPcAddrList[cid].push_front(blk_addr);
 
-#if 0
+#ifdef MAPI_PREDICTOR
 	// do prediction here and decide if this access should be SAM or PAM
-	if (predict(pc, cid) == false)
+	if (predict(pc, cid) == false && (pkt->cmd == MemCmd::WriteReq))
 	{
 		// predicted as miss do PAM
 		// allocate in PAMQueue
@@ -1075,10 +1133,14 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 
 		// we use pamQueue to track PAM requests
 		pamQueue[blk_addr] = new pamReqStatus();
+
 		// create MSHR entry
-		// we are sure that MSHR entry doesn't exist for this address since if
-		// there was an MSHR it would have been coalesced above
-		allocateMissBuffer(pkt,1,true);
+		// 1) we are sure that MSHR entry doesn't exist for this address since if
+		//   there was an MSHR it would have been coalesced above
+		// 2) we create a new read packet as PAM request can return later than
+		//    actual DRAMCache access
+		PacketPtr clone_pkt = new Packet (pkt, false, true);
+		allocateMissBuffer(clone_pkt, PREDICTION_LATENCY, true);
 	}
 #endif
 
@@ -1196,11 +1258,10 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		noTargetMSHR = NULL;
 	}
 
-	MSHR::Target *initial_tgt = mshr->getTarget ();
-
 	// write allocate policy - read resp do cache things
 	if(mshr->queue->index == 0 && pkt->isRead())
 	{
+		MSHR::Target *initial_tgt = mshr->getTarget ();
 		// find the cache block, set id and tag
 		// fix the tag entry now that memory access has returned
 		unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
@@ -1226,28 +1287,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 					evictAddr ,cacheSet, set[cacheSet].dirty);
 			// this block needs to be evicted
 			if (set[cacheSet].dirty)
-			{
-				// write back needed as this line is dirty
-				// allocate writeBuffer for this block
-				// reconstruct address from tag and set
-				// we create a dummy read req and send to access() to get data
-				Request *req = new Request(evictAddr, dramCache_block_size, 0,
-								Request::wbMasterId);
-				PacketPtr dummyRdPkt = new Packet(req, MemCmd::ReadReq);
-				PacketPtr wbPkt = new Packet(req, MemCmd::WriteReq);
-				dummyRdPkt->allocate();
-				wbPkt->allocate();
-
-				access(dummyRdPkt);
-				assert(dummyRdPkt->isResponse());
-
-				// copy data returned from dummyRdPkt to pkt
-				memcpy(wbPkt->getPtr<uint8_t>(), dummyRdPkt->getPtr<uint8_t>(),
-						dramCache_block_size);
-				delete dummyRdPkt;
-
-				allocateWriteBuffer(wbPkt,1);
-			}
+				doWriteBack(evictAddr);
 
 			// change the tag directory
 			set[cacheSet].tag = cacheTag;
@@ -1260,36 +1300,17 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		else
 			dramCache_mshr_miss_latency[0] += miss_latency; //cpu mshr miss latency
 
-		Tick completion_time = curTick() + pkt->headerDelay;
 
-		while (mshr->hasTargets () && (mshr->queue->index == 0))
+		while (mshr->hasTargets ())
 		{
 			MSHR::Target *target = mshr->getTarget ();
 			Packet *tgt_pkt = target->pkt;
 
 			assert(pkt->getAddr() == tgt_pkt->getAddr());
 
-			if (tgt_pkt->cmd == MemCmd::WriteReq)
-			{
-				// wont be a problem here actually because DRAM writes to backing store
-				//warn("unimplemented write req resp %d", pkt->getAddr());
-				DPRINTF(DRAMCache,"%s return from write miss\n", __func__);
-
-				set[cacheSet].dirty = true;
-				//Sending only response as access is already done during writeQ allocation
-				tgt_pkt->makeResponse();
-				port.schedTimingResp(tgt_pkt,completion_time);
-
-			}
-			else if (tgt_pkt->cmd == MemCmd::ReadReq)
-			{
-				DPRINTF(DRAMCache,"%s return from read miss\n", __func__);
-				tgt_pkt->setData(pkt->getConstPtr<uint8_t>());
-
-				tgt_pkt->makeResponse ();
-				tgt_pkt->headerDelay = tgt_pkt->payloadDelay = 0;
-				port.schedTimingResp (tgt_pkt, completion_time);
-			}
+			DPRINTF(DRAMCache,"%s return from read miss\n", __func__);
+			access(tgt_pkt);
+			respond(tgt_pkt, backendLatency);
 
 			mshr->popTarget ();
 		}
@@ -1564,21 +1585,10 @@ DRAMCacheCtrl::getTimingPacket ()
 	// set the command as readReq if it was MSHR else writeReq if it was writeBuffer
 	MemCmd cmd = mshr->queue->index ? MemCmd::WriteReq : MemCmd::ReadReq;
 
-	//if read request copy packet else write request create new packet and setData
+	//if MSHR (readReq) copy packet; for writeBuffer (writeReq) send same packet
 	if(cmd == MemCmd::ReadReq)
-	{
-		//MSHR entry and a WriteReq
-		if(tgt_pkt->cmd == MemCmd::WriteReq)
-		{
-//			pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);
-			pkt = new Packet(tgt_pkt,false,true);
-			pkt->cmd = cmd;
-		}
-		//MSHR entry and a ReadReq
-		else
-			pkt = new Packet(tgt_pkt,false,true);
-	}
-	else //WriteBuffer entry and a WritebackReq
+		pkt = new Packet(tgt_pkt,false,true);
+	else
 	{
 		pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);
 		pkt->allocate();

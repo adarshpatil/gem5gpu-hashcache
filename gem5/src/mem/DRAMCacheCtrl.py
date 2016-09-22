@@ -18,6 +18,7 @@ class DRAMCacheCtrl(DRAMCtrl):
     # dramcache_assoc cannot be anything other than 1
     dramcache_assoc = Param.Unsigned(1, "dramcache associativity")
     dramcache_block_size = Param.Unsigned(128, "dramcache block size")
+    dramcache_write_allocate = Param.Bool(False, "write allocate policy")
     # since assoc is currently fixed at 1, this param is just a place holder
     dramcache_replacement_scheme = Param.DRAMCacheReplacementScheme('lru',"DRAM Cache replacement policy")
 

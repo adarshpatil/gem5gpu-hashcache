@@ -119,19 +119,6 @@ class DRAMCacheCtrl : public DRAMCtrl
 	void processWriteRespondEvent();
 	EventWrapper<DRAMCacheCtrl, &DRAMCacheCtrl::processWriteRespondEvent> respondWriteEvent;
 
-	// holds Addr of requests that have been sent as PAM by predictor
-	typedef struct pamReqStatus
-	{
-		int isHit; // -1 initially; 0 miss; 1 hit
-		bool isPamComplete; // true if parallel memory request has returned
-		pamReqStatus()
-		{
-			isPamComplete = false;
-			isHit = -1;
-		}
-	}pamReqStatus;
-	std::map<Addr,pamReqStatus*> pamQueue;
-
 	DRAMCacheMasterPort dramCache_masterport;
 
 	MSHRQueue mshrQueue;
@@ -143,6 +130,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	uint64_t dramCache_size;
     uint64_t dramCache_assoc;
 	uint64_t dramCache_block_size;
+	bool dramCache_write_allocate;
 	uint64_t dramCache_access_count;
 	uint64_t dramCache_num_sets;
     Enums::DRAMCacheReplacementScheme replacement_scheme;
@@ -169,6 +157,18 @@ class DRAMCacheCtrl : public DRAMCtrl
     int num_cores; //num of CPU cores in the system, needed for per core predictor
 
     //  MAP-I PREDICTOR type goes here
+	// holds Addr of requests that have been sent as PAM by predictor
+	typedef struct pamReqStatus
+	{
+		int isHit; // -1 initially; 0 miss; 1 hit
+		bool isPamComplete; // true if parallel memory request has returned
+		pamReqStatus()
+		{
+			isPamComplete = false;
+			isHit = -1;
+		}
+	}pamReqStatus;
+	std::map<Addr,pamReqStatus*> pamQueue;
 
     // alloy cache - memory access counter saturating 3 bit counter
     // takes values between 0 to 7
@@ -274,6 +274,8 @@ class DRAMCacheCtrl : public DRAMCtrl
                                   PortID idx = InvalidPortID);
 
     bool doCacheLookup(PacketPtr pkt);  // check hit/miss; returns true for hit
+
+    void doWriteBack(Addr evictAddr);
 
     Addr blockAlign(Addr addr) const { return (addr & ~(Addr(dramCache_block_size - 1))); }
 
