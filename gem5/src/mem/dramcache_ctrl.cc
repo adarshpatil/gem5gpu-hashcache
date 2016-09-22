@@ -671,9 +671,8 @@ DRAMCacheCtrl::processWriteRespondEvent()
 	}
 	else
 	{
-		PacketPtr respPkt = dram_pkt->pkt;
 		DPRINTF(DRAMCache,"Responding to single burst address %d\n",
-				respPkt->getAddr());
+				dram_pkt->pkt->getAddr());
 
 		fatal("DRAMCache ctrl doesnt support single burst for write");
 	}
@@ -1116,8 +1115,8 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 
 	// perform prediction using cache address; lookup RubyPort::predictorTable
 	int cid = pkt->req->contextId();
-	Addr pc = RubyPort::pcTable[cid][blk_addr];
-	DPRINTF(DRAMCache,"PC %d for addr: %d\n",pc, blk_addr);
+	DPRINTF(DRAMCache,"PC %d for addr: %d\n", RubyPort::pcTable[cid][blk_addr],
+			blk_addr);
 
 	// adjust mruPcAddrList to keep it in MRU
 	RubyPort::mruPcAddrList[cid].remove(blk_addr);
