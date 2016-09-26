@@ -14,7 +14,7 @@
 #include <algorithm>
 
 #define PREDICTION_LATENCY 5
-#undef MAPI_PREDICTOR
+#define MAPI_PREDICTOR
 
 using namespace std;
 using namespace Data;
@@ -610,6 +610,8 @@ DRAMCacheCtrl::processWriteRespondEvent()
 		if (dram_pkt->burstHelper->burstsServiced
 				== dram_pkt->burstHelper->burstCount)
 		{
+			// nothing with regard to PAM as writes are serial - no prediction
+
 			// we have now serviced all children packets of a system packet
 			delete dram_pkt->burstHelper;
 			dram_pkt->burstHelper = NULL;
@@ -728,6 +730,157 @@ DRAMCacheCtrl::processRespondEvent ()
 
 			// Now access is complete, TAD unit available => doCacheLookup
 			bool isHit = doCacheLookup (dram_pkt->pkt);
+
+#ifdef MAPI_PREDICTOR
+			auto pamQueueItr =  pamQueue.find(dram_pkt->pkt->getAddr());
+			bool isInPamQueue = (pamQueueItr != pamQueue.end());
+			if (isInPamQueue)
+			{
+				pamQueueItr->second->isHit = isHit;
+				pamReq *pr = pamQueueItr->second;
+				// this address has a PAM request
+				if (pr->isPamComplete)
+				{
+					// status: memory request has returned
+					if (isHit)
+					{
+						// status: hit in dramcache
+						// access and respond to current packet
+						access (dram_pkt->pkt);
+						respond (dram_pkt->pkt,frontendLatency+backendLatency);
+
+						// throw away first target as this was the clone_pkt
+						// created to access the DRAM and also delete clone_pkt
+						delete pr->mshr->getTarget()->pkt;
+						pr->mshr->popTarget();
+
+						// access and repond to all packets in MSHR
+						while (pr->mshr->hasTargets())
+						{
+							MSHR::Target *target = pr->mshr->getTarget ();
+							Packet *tgt_pkt = target->pkt;
+							access (tgt_pkt);
+							respond (tgt_pkt, frontendLatency+backendLatency);
+							pr->mshr->popTarget();
+						}
+					}
+					else
+					{
+						// status: miss in dramcache
+						// first target packet contains data (clone_pkt) as per
+						// our mechanism in recvTimingResp
+						PacketPtr tgt_pkt, first_tgt_pkt;
+						first_tgt_pkt = pr->mshr->getTarget()->pkt;
+
+						Tick miss_latency = curTick () - pr->mshr->getTarget()->recvTime;
+						if (first_tgt_pkt->req->contextId () == 31)
+							dramCache_mshr_miss_latency[1] += miss_latency;
+						else
+							dramCache_mshr_miss_latency[0] += miss_latency;
+
+						pr->mshr->popTarget();
+
+						// copy data and respond to current packet
+						dram_pkt->pkt->allocate();
+						memcpy(dram_pkt->pkt->getPtr<uint8_t>(),
+								first_tgt_pkt->getPtr<uint8_t>(),
+								dramCache_block_size);
+						dram_pkt->pkt->makeResponse();
+						respond(dram_pkt->pkt, frontendLatency+backendLatency);
+
+						// copy data and respond to all packets in MSHR
+						while (pr->mshr->hasTargets())
+						{
+							tgt_pkt = pr->mshr->getTarget ()->pkt;
+							tgt_pkt->allocate();
+							memcpy(tgt_pkt->getPtr<uint8_t>(),
+									first_tgt_pkt->getPtr<uint8_t>(),
+									dramCache_block_size);
+							tgt_pkt->makeResponse();
+							respond(tgt_pkt, frontendLatency+backendLatency);
+							pr->mshr->popTarget ();
+
+						}
+						delete first_tgt_pkt;
+
+						// put the data into dramcache
+						// fill the dramcache and update tags
+						unsigned int cacheBlock = dram_pkt->pkt->getAddr()/dramCache_block_size;
+						unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+						unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+
+						Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
+						DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d isClean %d\n",
+								__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
+
+						// this block needs to be evicted
+						if (set[cacheSet].dirty)
+							doWriteBack(evictAddr);
+
+						// change the tag directory
+						set[cacheSet].tag = cacheTag;
+						set[cacheSet].dirty = false;
+
+					}
+
+					// deallocate MSHR and pamQueue entry
+					MSHRQueue *mq = pr->mshr->queue;
+					mq->deallocate(pr->mshr);
+					delete pr;
+					pamQueue.erase(pamQueueItr);
+					if (mq->isFull ())
+						clearBlocked ((BlockedCause) mq->index);
+				}
+				else
+				{
+					// status: PAM request not yet returned
+					if (isHit)
+					{
+						// status: hit in dramcache
+						// access and respond to current packet
+						access(dram_pkt->pkt);
+						respond(dram_pkt->pkt, frontendLatency+backendLatency);
+
+						assert(pr->mshr->getNumTargets()>=1);
+
+						// throw away first target as that was the clone_pkt
+						// created to send to DRAM
+						delete pr->mshr->getTarget()->pkt;
+						pr->mshr->popTarget();
+
+						// iterate through MSHR and access and respond to all
+						while (pr->mshr->hasTargets())
+						{
+							PacketPtr tgt_pkt = pr->mshr->getTarget ()->pkt;
+							access(tgt_pkt);
+							respond(tgt_pkt,frontendLatency+backendLatency);
+							pr->mshr->popTarget();
+						}
+
+						// deallocate MSHR
+						MSHRQueue *mq = pr->mshr->queue;
+						mq->deallocate(pr->mshr);
+						if (mq->isFull())
+							clearBlocked ((BlockedCause) mq->index);
+
+					}
+					else
+					{
+						// status: miss in dramcache
+						// add current packet to MSHR
+						pr->mshr->allocateTarget(dram_pkt->pkt,
+								dram_pkt->pkt->headerDelay, order++);
+
+						// mshr will continue coalescing req
+						// response will be sent to all when memory req returns
+
+					}
+
+				}
+				return;
+
+			}
+#endif
 
 			if (!isHit)  // miss send cache fill request
 			{
@@ -1123,23 +1276,28 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	RubyPort::mruPcAddrList[cid].push_front(blk_addr);
 
 #ifdef MAPI_PREDICTOR
-	// do prediction here and decide if this access should be SAM or PAM
-	if (predict(pc, cid) == false && (pkt->cmd == MemCmd::WriteReq))
+	// do prediction only for readReq, decide if this access should be SAM/PAM
+	// prediction is done only for CPU requests, GPU requests are serial
+	if ( (pkt->cmd == MemCmd::ReadReq) && (pkt->req->contextId () != 31))
 	{
-		// predicted as miss do PAM
-		// allocate in PAMQueue
-		// create an entry in MSHR, which will send a request to memory
+		if (predict(RubyPort::pcTable[cid][blk_addr], cid) == false)
+		{
+			// predicted as miss do PAM
+			// allocate in PAMQueue
+			// create an entry in MSHR, which will send a request to memory
 
-		// we use pamQueue to track PAM requests
-		pamQueue[blk_addr] = new pamReqStatus();
+			// we use pamQueue to track PAM requests
+			pamQueue[blk_addr] = new pamReq();
 
-		// create MSHR entry
-		// 1) we are sure that MSHR entry doesn't exist for this address since if
-		//   there was an MSHR it would have been coalesced above
-		// 2) we create a new read packet as PAM request can return later than
-		//    actual DRAMCache access
-		PacketPtr clone_pkt = new Packet (pkt, false, true);
-		allocateMissBuffer(clone_pkt, PREDICTION_LATENCY, true);
+			// create MSHR entry
+			// 1) we are sure that MSHR entry doesn't exist for this address since if
+			//   there was an MSHR it would have been coalesced above
+			// 2) we create a new read packet as PAM request can return later than
+			//    actual DRAMCache access
+			PacketPtr clone_pkt = new Packet (pkt, false, true);
+			pamQueue[blk_addr]->mshr =
+					allocateMissBuffer(clone_pkt, PREDICTION_LATENCY, true);
+		}
 	}
 #endif
 
@@ -1241,6 +1399,101 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 {
 	assert(pkt->isResponse ());
 
+#ifdef MAPI_PREDICTOR
+	auto pamQueueItr =  pamQueue.find(pkt->getAddr());
+	bool isInPamQueue = (pamQueueItr != pamQueue.end());
+	if (isInPamQueue)
+	{
+		pamQueueItr->second->isPamComplete = true;
+		pamReq *pr = pamQueueItr->second;
+		// found in PAM Queue
+		if (pr->isHit == -1)
+		{
+			// DRAMCache hasn't done access so we dont know hit or miss
+			// we put the data returned from this packet, that came from DRAM
+			// into the first target of the MSHR for use incase of a miss
+			// (which is the clone_pkt we created for PAM requests)
+			PacketPtr tgt_pkt = pamQueueItr->second->mshr->getTarget()->pkt;
+			tgt_pkt->allocate();
+			memcpy(tgt_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
+					dramCache_block_size);
+			delete pkt;
+			return;
+		}
+		else if (pr->isHit == true)
+		{
+			// do nothing here , delete packet and pamQueue done later
+			// as they are common between isHit true and false
+
+		}
+		else if (pr->isHit == false)
+		{
+			// iterate through MSHR and make response and pop target
+			MSHR *mshr = dynamic_cast<MSHR*> (pkt->senderState);
+
+			assert(mshr);
+
+			// the mshr in the recieved packet should be same as PAMQueue mshr
+			assert(mshr==pr->mshr);
+
+			MSHRQueue *mq = mshr->queue;
+			bool wasFull = mq->isFull ();
+
+			if (mshr == noTargetMSHR)
+			{
+				clearBlocked (Blocked_NoTargets);
+				noTargetMSHR = NULL;
+			}
+
+			// throw away first target as it was the clone_pkt used to
+			// send request to DRAM
+			delete mshr->getTarget()->pkt;
+			mshr->popTarget();
+
+			while (mshr->hasTargets ())
+			{
+				MSHR::Target *target = mshr->getTarget ();
+				Packet *tgt_pkt = target->pkt;
+				tgt_pkt->allocate();
+				memcpy(tgt_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
+							dramCache_block_size);
+				tgt_pkt->makeResponse();
+				respond(tgt_pkt,1);
+				mshr->popTarget();
+			}
+
+			mq->deallocate(pr->mshr);
+			if (wasFull)
+				clearBlocked ((BlockedCause) mq->index);
+
+			// update tags
+			unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
+			unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+			unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+
+			Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
+			DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d isClean %d\n",
+					__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
+
+			// this block needs to be evicted
+			if (set[cacheSet].dirty)
+				doWriteBack(evictAddr);
+
+			// change the tag directory
+			set[cacheSet].tag = cacheTag;
+			set[cacheSet].dirty = false;
+		}
+
+		delete pkt->req;
+		delete pkt;
+		delete pr;
+		pamQueue.erase(pamQueueItr);
+
+		return;
+
+	}
+#endif
+
 	MSHR *mshr = dynamic_cast<MSHR*> (pkt->senderState);
 
 	assert(mshr);
@@ -1282,8 +1535,8 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		else if (set[cacheSet].tag != cacheTag)
 		{
 			Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-			DPRINTF(DRAMCache, "Evicting addr %d in cacheSet %d isClean %d\n",
-					evictAddr ,cacheSet, set[cacheSet].dirty);
+			DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d isClean %d\n",
+					__func__,evictAddr ,cacheSet, set[cacheSet].dirty);
 			// this block needs to be evicted
 			if (set[cacheSet].dirty)
 				doWriteBack(evictAddr);
@@ -1584,7 +1837,9 @@ DRAMCacheCtrl::getTimingPacket ()
 	// set the command as readReq if it was MSHR else writeReq if it was writeBuffer
 	MemCmd cmd = mshr->queue->index ? MemCmd::WriteReq : MemCmd::ReadReq;
 
-	//if MSHR (readReq) copy packet; for writeBuffer (writeReq) send same packet
+	//if MSHR (readReq) copy packet;
+	// for writeBuffer (writeReq) send same packet, but it was crashing
+	// so even for writeBuffer we created new packet
 	if(cmd == MemCmd::ReadReq)
 		pkt = new Packet(tgt_pkt,false,true);
 	else
@@ -1660,6 +1915,7 @@ DRAMCacheCtrl::hash_pc (Addr pc)
 bool
 DRAMCacheCtrl::predict(ContextID contextId, Addr pc)
 {
+	dramCache_total_pred++;
 	if(predictor[contextId][hash_pc(pc)]>3)
 		return false;
 	else

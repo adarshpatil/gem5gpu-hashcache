@@ -158,17 +158,18 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     //  MAP-I PREDICTOR type goes here
 	// holds Addr of requests that have been sent as PAM by predictor
-	typedef struct pamReqStatus
+	typedef struct pamReq
 	{
 		int isHit; // -1 initially; 0 miss; 1 hit
 		bool isPamComplete; // true if parallel memory request has returned
-		pamReqStatus()
+		MSHR* mshr;
+		pamReq()
 		{
 			isPamComplete = false;
 			isHit = -1;
 		}
-	}pamReqStatus;
-	std::map<Addr,pamReqStatus*> pamQueue;
+	}pamReq;
+	std::map<Addr,pamReq*> pamQueue;
 
     // alloy cache - memory access counter saturating 3 bit counter
     // takes values between 0 to 7
