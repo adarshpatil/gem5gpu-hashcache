@@ -13,8 +13,9 @@
 
 #include <algorithm>
 
+#define DRAM_PKT_COUNT 2
 #define PREDICTION_LATENCY 5
-#define MAPI_PREDICTOR
+#undef MAPI_PREDICTOR
 
 using namespace std;
 using namespace Data;
@@ -132,7 +133,6 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				total_gpu_lines++;
 				switched_to_gpu_line++;
 			}
-			dramCache_gpu_occupancy_per_set[cacheSet]++;
 		}
 		else // not a GPU req - it is a CPU req
 		{
@@ -188,6 +188,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		{
 			DPRINTF(DRAMCache, "GPU request %d is a %s miss\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
+
+			dramCache_gpu_occupancy_per_set.sample(cacheSet);
 
 			if (set[cacheSet].valid) // valid line - causes eviction
 			{
@@ -1065,7 +1067,7 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
     // ADARSH calcuating DRAM cache address here
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
-	// ADARSH packet count is ; we need to number our sets in multiplies of 2
+	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
 	BurstHelper* burst_helper = NULL;
@@ -1308,15 +1310,15 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	unsigned size = pkt->getSize ();
 	//unsigned offset = pkt->getAddr () & (burstSize - 1);
 	//unsigned int dram_pkt_count = divCeil (offset + size, burstSize);
-	// ADARSH i know i need 5 burts for TAD; 4 for data and 1 for tag
-	// we modified this to 2 bursts including tag
-	unsigned int dram_pkt_count = 2;
+	// we know that we need 5 burts for TAD; 4 for data and 1 for tag
+	// UPDATE we modified this to 2 bursts including tag since we assume the
+	// tags also burst out using an odd burst size of slightly greater than 64B
 
 	// check local buffers and do not accept if full
 	if (pkt->isRead ())
 	{
 		assert(size != 0);
-		if (readQueueFull (dram_pkt_count))
+		if (readQueueFull (DRAM_PKT_COUNT))
 		{
 			DPRINTF(DRAMCache, "Read queue full, not accepting\n");
 			// remember that we have to retry this port
@@ -1326,7 +1328,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		}
 		else
 		{
-			addToReadQueue (pkt, dram_pkt_count);
+			addToReadQueue (pkt, DRAM_PKT_COUNT);
 			readReqs++;
 			if (pkt->req->contextId () == 31)
 				gpuReadReqs++;
@@ -1338,7 +1340,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	else if (pkt->isWrite ())
 	{
 		assert(size != 0);
-		if (writeQueueFull (dram_pkt_count))
+		if (writeQueueFull (DRAM_PKT_COUNT))
 		{
 			DPRINTF(DRAMCache, "Write queue full, not accepting\n");
 			// remember that we have to retry this port
@@ -1348,7 +1350,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		}
 		else
 		{
-			addToWriteQueue (pkt, dram_pkt_count);
+			addToWriteQueue (pkt, DRAM_PKT_COUNT);
 			writeReqs++;
 			if (pkt->req->contextId () == 31)
 				gpuWriteReqs++;
@@ -1619,130 +1621,167 @@ DRAMCacheCtrl::regStats ()
 	using namespace Stats;
 	DRAMCtrl::regStats ();
 
-	dramCache_read_hits.name (name () + ".dramCache_read_hits").desc (
-			"Number of read hits in dramcache");
+	dramCache_read_hits
+		.name (name () + ".dramCache_read_hits")
+		.desc ("Number of read hits in dramcache");
 
-	dramCache_read_misses.name (name () + ".dramCache_read_misses").desc (
-			"Number of read misses in dramcache");
+	dramCache_read_misses
+		.name (name () + ".dramCache_read_misses")
+		.desc ("Number of read misses in dramcache");
 
-	dramCache_write_hits.name (name () + ".dramCache_write_hits").desc (
-			"Number of write hits in dramcache");
+	dramCache_write_hits
+		.name (name () + ".dramCache_write_hits")
+		.desc ("Number of write hits in dramcache");
 
-	dramCache_write_misses.name (name () + ".dramCache_write_misses").desc (
-			"Number of write misses in dramcache");
+	dramCache_write_misses
+	.name (name () + ".dramCache_write_misses")
+	.desc ("Number of write misses in dramcache");
 
-	dramCache_evicts.name (name () + ".dramCache_evicts").desc (
-			"Number of evictions from dramcache");
+	dramCache_evicts
+		.name (name () + ".dramCache_evicts")
+		.desc ("Number of evictions from dramcache");
 
-	dramCache_write_backs.name (name () + ".dramCache_write_backs").desc (
-			"Number of write backs from dramcache");
+	dramCache_write_backs
+		.name (name () + ".dramCache_write_backs")
+		.desc ("Number of write backs from dramcache");
 
-	dramCache_write_backs_on_read.name (
-			name () + ".dramCache_write_backs_on_read").desc (
-					"Number of write backs caused by a read from dramcache");
+	dramCache_write_backs_on_read
+		.name (name () + ".dramCache_write_backs_on_read")
+		.desc ("Number of write backs caused by a read from dramcache");
 
-	dramCache_writes_to_dirty_lines.name (
-			name () + "dramCache_writes_to_dirty_lines").desc (
-					"Number of writes to dirty lines in dramcache");
+	dramCache_writes_to_dirty_lines
+		.name (name () + "dramCache_writes_to_dirty_lines")
+		.desc ("Number of writes to dirty lines in dramcache");
 
-	dramCache_gpu_replaced_cpu.name (name () + ".dramCache_gpu_replaced_cpu").desc (
-			"Number of times gpu replaced cpu line ");
+	dramCache_gpu_replaced_cpu
+		.name (name () + ".dramCache_gpu_replaced_cpu")
+		.desc ("Number of times gpu replaced cpu line ");
 
-	dramCache_cpu_replaced_gpu.name (name () + ".dramCache_cpu_replaced_gpu").desc (
-			"Number of times cpu replaced gpu line ");
+	dramCache_cpu_replaced_gpu
+		.name (name () + ".dramCache_cpu_replaced_gpu")
+		.desc ("Number of times cpu replaced gpu line ");
 
-	switched_to_gpu_line.name (name () + ".switched_to_gpu_line").desc (
-			"Number of times CPU line became GPU line in cache ");
+	switched_to_gpu_line
+		.name (name () + ".switched_to_gpu_line")
+		.desc ("Number of times CPU line became GPU line in cache ");
 
-	switched_to_cpu_line.name (name () + ".switched_to_cpu_line").desc (
-			"Number of times GPU line became CPU line in cache ");
+	switched_to_cpu_line
+		.name (name () + ".switched_to_cpu_line")
+		.desc ("Number of times GPU line became CPU line in cache ");
 
-	dramCache_cpu_hits.name (name () + ".dramCache_cpu_hits").desc (
-			"Number of hits for CPU Requests");
+	dramCache_cpu_hits
+		.name (name () + ".dramCache_cpu_hits")
+		.desc ("Number of hits for CPU Requests");
 
-	dramCache_cpu_misses.name (name () + ".dramCache_cpu_misses").desc (
-			"Number of misses for CPU Requests");
+	dramCache_cpu_misses
+		.name (name () + ".dramCache_cpu_misses")
+		.desc ("Number of misses for CPU Requests");
 
-	dramCache_mshr_hits.name (name () + ".dramCache_mshr_hits").desc (
-			"Number of hits in the MSHR");
+	dramCache_mshr_hits
+		.name (name () + ".dramCache_mshr_hits")
+		.desc ("Number of hits in the MSHR");
 
-	dramCache_cpu_mshr_hits.name (name () + ".dramCache_cpu_mshr_hits").desc (
-			"Number of hits for CPU requests in the MSHR");
+	dramCache_cpu_mshr_hits
+		.name (name () + ".dramCache_cpu_mshr_hits")
+		.desc ("Number of hits for CPU requests in the MSHR");
 
-	dramCache_writebuffer_hits.name (name () + ".dramCache_writebuffer_hits").desc (
-			"Number of hits in the writebuffer");
+	dramCache_writebuffer_hits
+		.name (name () + ".dramCache_writebuffer_hits")
+		.desc ("Number of hits in the writebuffer");
 
-	dramCache_cpu_writebuffer_hits.name (name () + ".dramCache_cpu_writebuffer_hits").desc (
-			"Number of hits for CPU requests in the writebuffer");
+	dramCache_cpu_writebuffer_hits
+		.name (name () + ".dramCache_cpu_writebuffer_hits")
+		.desc ("Number of hits for CPU requests in the writebuffer");
 
-	dramCache_max_gpu_dirty_lines.name (name () + ".dramCache_max_gpu_dirty_lines").desc (
-			"maximum number of gpu dirty lines in cache");
+	dramCache_max_gpu_dirty_lines
+		.name (name () + ".dramCache_max_gpu_dirty_lines")
+		.desc ("maximum number of gpu dirty lines in cache");
 
-	dramCache_total_pred.name ( name() + ".dramCache_total_pred").desc(
-			"total number of predictions made");
+	dramCache_total_pred
+		.name ( name() + ".dramCache_total_pred")
+		.desc("total number of predictions made");
 
-	dramCache_incorrect_pred.name ( name() + ".dramCache_incorrect_pred").desc(
-				"Number of incorrect predictions");
+	dramCache_incorrect_pred
+		.name ( name() + ".dramCache_incorrect_pred")
+		.desc("Number of incorrect predictions");
 
-	dramCache_mshr_miss_latency.init (2).name (
-			name () + ".dramCache_mshr_miss_latency").desc (
-					"total miss latency of mshr for cpu and gpu");
+	dramCache_mshr_miss_latency
+		.init (2)
+		.name (name () + ".dramCache_mshr_miss_latency")
+		.desc ("total miss latency of mshr for cpu and gpu");
 
-	dramCache_gpu_occupancy_per_set.init (dramCache_num_sets).name (
-			name () + ".dramCache_gpu_occupancy_per_set").desc (
-					"Number of times the way was occupied by GPU line");
+	dramCache_gpu_occupancy_per_set
+		.init (1000)
+		.name (name () + ".dramCache_gpu_occupancy_per_set")
+		.desc ("Number of times the way was occupied by GPU line")
+		.flags (nozero);
 
-	dramCache_hit_rate.name (name () + ".dramCache_hit_rate").desc (
-			"hit rate of dramcache");
+	dramCache_hit_rate
+		.name (name () + ".dramCache_hit_rate")
+		.desc ("hit rate of dramcache");
+
 	dramCache_hit_rate = (dramCache_read_hits + dramCache_write_hits)
            / (dramCache_read_hits + dramCache_read_misses + dramCache_write_hits
     				  + dramCache_write_misses);
 
-	dramCache_rd_hit_rate.name (name () + ".dramCache_rd_hit_rate").desc (
-			"read hit rate of dramcache");
+	dramCache_rd_hit_rate
+		.name (name () + ".dramCache_rd_hit_rate")
+		.desc ("read hit rate of dramcache");
+
 	dramCache_rd_hit_rate = (dramCache_read_hits)
           / (dramCache_read_hits + dramCache_read_misses);
 
-	dramCache_wr_hit_rate.name (name () + "dramCache_wr_hit_rate").desc (
-			"write hit rate of dramcache");
+	dramCache_wr_hit_rate
+		.name (name () + "dramCache_wr_hit_rate")
+		.desc ("write hit rate of dramcache");
+
 	dramCache_wr_hit_rate = (dramCache_write_hits)
          / (dramCache_write_hits + dramCache_write_misses);
 
-	dramCache_evict_rate.name (name () + ".dramCache_evict_rate").desc (
-			"evict rate of dramcache - evicts/accesses");
+	dramCache_evict_rate
+		.name (name () + ".dramCache_evict_rate")
+		.desc ("evict rate of dramcache - evicts/accesses");
+
 	dramCache_evict_rate = dramCache_evicts
         / (dramCache_read_hits + dramCache_read_misses + dramCache_write_hits
 					+ dramCache_write_misses);
 
-	dramCache_cpu_hit_rate.name (name () + "dramCache_cpu_hit_rate").desc (
-			"hit rate of dramcache for CPU");
+	dramCache_cpu_hit_rate
+		.name (name () + "dramCache_cpu_hit_rate")
+		.desc ("hit rate of dramcache for CPU");
+
 	dramCache_cpu_hit_rate = (dramCache_cpu_hits)
         / (dramCache_cpu_hits + dramCache_cpu_misses);
 
-	dramCache_gpu_hit_rate.name (name () + "dramCache_gpu_hit_rate").desc (
-			"hit rate of dramcache for GPU");
+	dramCache_gpu_hit_rate
+		.name (name () + "dramCache_gpu_hit_rate")
+		.desc ("hit rate of dramcache for GPU");
+
 	dramCache_gpu_hit_rate =
 			((dramCache_read_hits + dramCache_write_hits) - dramCache_cpu_hits)
 			/ ((dramCache_read_hits + dramCache_write_hits) - dramCache_cpu_hits)
 			+ ((dramCache_read_misses + dramCache_write_misses)
 					- dramCache_cpu_misses);
 
-	dramCache_correct_pred.name ( name() + "dramCache_correct_pred").desc (
-			"Number of correct predictions");
+	dramCache_correct_pred
+		.name ( name() + "dramCache_correct_pred")
+		.desc ("Number of correct predictions");
 
 	dramCache_correct_pred = dramCache_total_pred - dramCache_incorrect_pred;
 
-	blocked_cycles.init (NUM_BLOCKED_CAUSES);
-	blocked_cycles.name (name () + ".blocked_cycles").desc (
-			"number of cycles access was blocked").subname (Blocked_NoMSHRs,
-					"no_mshrs").subname (
-							Blocked_NoTargets, "no_targets");
+	blocked_cycles
+		.init (NUM_BLOCKED_CAUSES)
+		.name (name () + ".blocked_cycles")
+		.desc ("number of cycles access was blocked")
+		.subname (Blocked_NoMSHRs,"no_mshrs")
+		.subname (Blocked_NoTargets, "no_targets");
 
-	blocked_causes.init (NUM_BLOCKED_CAUSES);
-	blocked_causes.name (name () + ".blocked").desc (
-			"number of times access was blocked").subname (Blocked_NoMSHRs,
-					"no_mshrs").subname (
-							Blocked_NoTargets, "no_targets");
+	blocked_causes
+		.init (NUM_BLOCKED_CAUSES)
+		.name (name () + ".blocked")
+		.desc ("number of times access was blocked")
+		.subname (Blocked_NoMSHRs,"no_mshrs")
+		.subname (Blocked_NoTargets, "no_targets");
 }
 
 BaseMasterPort &

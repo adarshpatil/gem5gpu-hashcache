@@ -156,6 +156,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     int num_cores; //num of CPU cores in the system, needed for per core predictor
 
+    bool dramCacheTimingMode;
+
     //  MAP-I PREDICTOR type goes here
 	// holds Addr of requests that have been sent as PAM by predictor
 	typedef struct pamReq
@@ -214,7 +216,6 @@ class DRAMCacheCtrl : public DRAMCtrl
 
 	struct dramCacheSet_t * set;
 
-	bool dramCacheTimingMode;
 	Stats::Scalar dramCache_read_hits;
 	Stats::Scalar dramCache_read_misses;
 	Stats::Scalar dramCache_write_hits;
@@ -229,7 +230,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar switched_to_cpu_line; // GPU lines that became CPU lines in cache
 	Stats::Scalar dramCache_cpu_hits;   // hits for CPU req
 	Stats::Scalar dramCache_cpu_misses; // misses for CPU req
-	Stats::Vector dramCache_gpu_occupancy_per_set; //number of times the set was occupied by GPU
+	Stats::Histogram dramCache_gpu_occupancy_per_set; //number of times the set was occupied by GPU
 	Stats::Scalar dramCache_mshr_hits;
 	Stats::Scalar dramCache_cpu_mshr_hits;
 	Stats::Scalar dramCache_writebuffer_hits;
