@@ -158,6 +158,16 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     bool dramCacheTimingMode;
 
+    const uint32_t fillHighThreshold;
+    const uint32_t fillBufferSize;
+
+    uint32_t cacheFillsThisTime;
+    uint32_t cacheWritesThisTime;
+
+    std::deque<DRAMPacket*> fillQueue;
+    // addr, drampkt_addr
+    std::set<std::pair<Addr,Addr>> isInFillQueue;
+
     //  MAP-I PREDICTOR type goes here
 	// holds Addr of requests that have been sent as PAM by predictor
 	typedef struct pamReq
@@ -239,6 +249,11 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Vector dramCache_mshr_miss_latency; // Total cycle latency of MSHR [0]-cpu [1]-gpu
 	Stats::Scalar dramCache_total_pred; // number of predictions made
 	Stats::Scalar dramCache_incorrect_pred; // number of miss predictions by predictor
+
+	Stats::Scalar dramCache_fillBursts; // stats for fill bursts
+	Stats::Average dramCache_avgFillQLen; // average fill Q length
+	Stats::Histogram fillsPerTurnAround;
+	Stats::Scalar dramCache_servicedByFillQ; // reads serviced by fillQ
 
 	Stats::Formula dramCache_hit_rate;
 	Stats::Formula dramCache_rd_hit_rate;
@@ -418,10 +433,17 @@ class DRAMCacheCtrl : public DRAMCtrl
     void addToReadQueue(PacketPtr pkt, unsigned int pktCount);
     void addToWriteQueue(PacketPtr pkt, unsigned int pktCount);
 
+    // decode incoming pkt, create dram_pkt and push it to the back of fillQueue
+    void addToFillQueue(PacketPtr pkt, unsigned int pktCount);
+    // check if fill Queue has room for pktCount number of entries
+    // true if full , false otherwise
+    bool fillQueueFull(unsigned int neededEntries) const;
+
     bool recvTimingReq(PacketPtr pkt);
 
     void recvTimingResp(PacketPtr pkt);
 
+    void doDRAMAccess(DRAMPacket* dram_pkt);
     // predictor functions
     uint64_t hash_pc (Addr pc);
     bool predict(ContextID contextId, Addr pc); // true for hit; false for miss

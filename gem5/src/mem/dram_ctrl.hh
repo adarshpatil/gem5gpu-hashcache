@@ -442,7 +442,13 @@ class DRAMCtrl : public AbstractMemory
         /** This comes from the outside world */
         const PacketPtr pkt;
 
+        /** ADARSH added for dramcache fill request since packet is deleted
+            stores original request addr; duplicated from pkt->getAddr() */
+        Addr requestAddr;
+
         const bool isRead;
+        // ADARSH true for fill requests - used in dramcache
+        bool isFill;
 
         /** Will be populated by address decoder */
         const uint8_t rank;
@@ -482,7 +488,7 @@ class DRAMCtrl : public AbstractMemory
                    uint32_t _row, uint16_t bank_id, Addr _addr,
                    unsigned int _size, Bank& bank_ref, Rank& rank_ref)
             : entryTime(curTick()), readyTime(curTick()),
-              pkt(_pkt), isRead(is_read), rank(_rank), bank(_bank), row(_row),
+              pkt(_pkt), isRead(is_read), isFill(false), rank(_rank), bank(_bank), row(_row),
               bankId(bank_id), addr(_addr), size(_size), burstHelper(NULL),
               bankRef(bank_ref), rankRef(rank_ref)
         { }
@@ -556,7 +562,7 @@ class DRAMCtrl : public AbstractMemory
      *
      * @param pkt The DRAM packet created from the outside world pkt
      */
-    void doDRAMAccess(DRAMPacket* dram_pkt);
+    virtual void doDRAMAccess(DRAMPacket* dram_pkt);
 
     /**
      * When a packet reaches its "readyTime" in the response Q,

@@ -31,6 +31,12 @@ class DRAMCacheCtrl(DRAMCtrl):
     
     dramcache_timing = Param.Bool(False,"DRAMCache running in timing mode")
 
+    # threshold in percent for when to forcefully trigger fill and
+    # start emptying the fill buffer when busState is write
+    fill_high_thresh_perc = Param.Percent(85, "Threshold to force fills")
+
+    fill_buffer_size = Param.Unsigned(64, "Number of fill queue entries")
+
 # A single DDR3-1600 x64 channel (one command and address bus), with
 # timings based on a DDR3-1600 4 Gbit datasheet (Micron MT41J512M8) in
 # an 8x8 configuration.
@@ -206,6 +212,7 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     demand_mshr_reserve = 1
     tgts_per_mshr = 16
 
-    write_high_thresh_perc = 30
-    write_low_thresh_perc = 10
+    # for dramcache this write theshold is (cache writes + cache fills)
+    write_high_thresh_perc = 36
+    write_low_thresh_perc = 18
     min_writes_per_switch = 10
