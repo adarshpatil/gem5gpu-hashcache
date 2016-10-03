@@ -51,8 +51,10 @@
 #include "sim/full_system.hh"
 #include "sim/system.hh"
 
-std::map <int,RubyPort::PCAddrMap> RubyPort::pcTable;
-std::map <int, RubyPort::AddrList> RubyPort::mruPcAddrList;
+#ifdef PASS_PC
+std::unordered_map <int,RubyPort::PCAddrMap> RubyPort::pcTable;
+std::unordered_map <int, RubyPort::AddrList> RubyPort::mruPcAddrList;
+#endif
 
 RubyPort::RubyPort(const Params *p)
     : MemObject(p), m_ruby_system(p->ruby_system), m_version(p->version),
@@ -231,7 +233,10 @@ RubyPort::MemSlavePort::recvTimingReq(PacketPtr pkt)
 	DPRINTF(RubyPort, "ADARSH Timing request for address %d on port %d, ContextId: %d Threadid:%d hasPC:%d\n",
 			pkt->getAddr(), id, pkt->req->contextId(), pkt->req->threadId(), pkt->req->hasPC());
 
+#ifdef PASS_PC
 	// ADARSH add to addr -> pc mapping in a dictionary for dramcache predictor
+	// TODO we need pcTable to be populated only for CPU requests, currently
+	// it's populating irrespective of cpu or gpu
 	int cid = pkt->req->contextId();
 	if(pkt->req->hasPC())
 	{
@@ -251,6 +256,7 @@ RubyPort::MemSlavePort::recvTimingReq(PacketPtr pkt)
 	}
 	else
 		warn("no PC value found for address:%d", pkt->getAddr());
+#endif
 
     RubyPort *ruby_port = static_cast<RubyPort *>(&owner);
 

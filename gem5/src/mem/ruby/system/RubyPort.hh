@@ -44,7 +44,7 @@
 
 #include <cassert>
 #include <string>
-#include <map> //ADARSH added
+#include <unordered_map> //ADARSH added
 #include <list> //ADARSH added
 #include "mem/protocol/RequestStatus.hh"
 #include "mem/ruby/network/MessageBuffer.hh"
@@ -53,20 +53,23 @@
 #include "mem/tport.hh"
 #include "params/RubyPort.hh"
 
+#undef PASS_PC // ADARSH added
+
 class AbstractController;
 
 class RubyPort : public MemObject
 {
   public:
 
+#ifdef PASS_PC
 	// ADARSH PC to Address mapping
 	// predictor table size fixed to 1024
-	// TODO implement 1024
-	typedef std::map<Addr, Addr> PCAddrMap; // this is for 1 core
-	static std::map<int, PCAddrMap> pcTable; // this is per core PCAddrMap
+	typedef std::unordered_map<Addr, Addr> PCAddrMap; // this is for 1 core
+	static std::unordered_map<int, PCAddrMap> pcTable; // this is per core PCAddrMap
 	static const int pcTableMaxSize=1024;
 	typedef std::list<Addr> AddrList;
-	static std::map<int,AddrList> mruPcAddrList;
+	static std::unordered_map<int,AddrList> mruPcAddrList;
+#endif
 
     class MemMasterPort : public QueuedMasterPort
     {

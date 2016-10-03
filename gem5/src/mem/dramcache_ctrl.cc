@@ -13,10 +13,6 @@
 
 #include <algorithm>
 
-#define DRAM_PKT_COUNT 2
-#define PREDICTION_LATENCY 5
-#define MAPI_PREDICTOR
-
 using namespace std;
 using namespace Data;
 
@@ -135,6 +131,9 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			{
 				set[cacheSet].isGPUOwned = true;
 				total_gpu_lines++;
+				if(total_gpu_lines > dramCache_max_gpu_lines.value())
+					dramCache_max_gpu_lines = total_gpu_lines;
+
 				switched_to_gpu_line++;
 			}
 		}
@@ -173,6 +172,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 
 		}
 
+#ifdef PASS_PC
 		// Knowing its a hit; inc the prediction and do stats
 		Addr alignedAddr = pkt->getAddr() & ~(Addr(128 - 1));
 		int cid = pkt->req->contextId();
@@ -180,6 +180,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		if(predict(cid, alignedAddr) == false) // predicted miss but was hit
 			dramCache_incorrect_pred++;
 		incMac(cid, pc);
+#endif
 
 		// TODO do the sub block thing here NOT YET IMPLEMENTED
 		return true;
@@ -262,6 +263,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			}
 		}
 
+#ifdef PASS_PC
 		// Knowing its a miss; dec the prediction and do stats
 		Addr alignedAddr = pkt->getAddr() & ~(Addr(128 - 1));
 		int cid = pkt->req->contextId();
@@ -269,6 +271,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		if(predict(cid, alignedAddr) == true) // predicted hit but was miss
 			dramCache_incorrect_pred++;
 		decMac(cid, pc);
+#endif
 
 		return false;
 	}
@@ -1407,6 +1410,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		return true;
 	}
 
+#ifdef PASS_PC
 	// perform prediction using cache address; lookup RubyPort::predictorTable
 	int cid = pkt->req->contextId();
 	DPRINTF(DRAMCache,"PC %d for addr: %d\n", RubyPort::pcTable[cid][blk_addr],
@@ -1415,6 +1419,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// adjust mruPcAddrList to keep it in MRU
 	RubyPort::mruPcAddrList[cid].remove(blk_addr);
 	RubyPort::mruPcAddrList[cid].push_front(blk_addr);
+#endif
 
 #ifdef MAPI_PREDICTOR
 	// do prediction only for readReq, decide if this access should be SAM/PAM
@@ -1874,7 +1879,7 @@ DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         bool got_more_hits = false;
         bool got_bank_conflict = false;
 
-        // either look at the read queue or write queue
+        // either look at the read queue or write queue or fill queue
         const deque<DRAMPacket*>& queue = dram_pkt->isRead ? readQueue :
             (dram_pkt->isFill ? fillQueue : writeQueue);
         auto p = queue.begin();
@@ -2071,6 +2076,10 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_max_gpu_dirty_lines")
 		.desc ("maximum number of gpu dirty lines in cache");
 
+	dramCache_max_gpu_lines
+		.name (name () + ".dramCache_max_gpu_lines")
+		.desc ("maximum number of gpu lines in cache");
+
 	dramCache_total_pred
 		.name ( name() + ".dramCache_total_pred")
 		.desc("total number of predictions made");
@@ -2108,6 +2117,12 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_gpu_occupancy_per_set")
 		.desc ("Number of times the way was occupied by GPU line")
 		.flags (nozero);
+
+	dramCache_max_gpu_occupancy
+		.name (name() + "")
+		.desc("% max gpu occupancy in dramcache");
+
+	dramCache_max_gpu_occupancy = (dramCache_max_gpu_lines / dramCache_num_sets) * 100;
 
 	dramCache_hit_rate
 		.name (name () + ".dramCache_hit_rate")

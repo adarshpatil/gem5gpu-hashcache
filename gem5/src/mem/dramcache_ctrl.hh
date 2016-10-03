@@ -30,6 +30,9 @@
 #include "mem/cache/mshr_queue.hh"
 #include "debug/DRAMCache.hh"
 
+#define DRAM_PKT_COUNT 2
+#define PREDICTION_LATENCY 5
+#undef MAPI_PREDICTOR
 
 class DRAMCacheCtrl : public DRAMCtrl
 {
@@ -240,12 +243,17 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar switched_to_cpu_line; // GPU lines that became CPU lines in cache
 	Stats::Scalar dramCache_cpu_hits;   // hits for CPU req
 	Stats::Scalar dramCache_cpu_misses; // misses for CPU req
-	Stats::Histogram dramCache_gpu_occupancy_per_set; //number of times the set was occupied by GPU
+	// histogram grouping of set numbers (1000 buckets) and number of times sets were occupied by GPU
+	Stats::Histogram dramCache_gpu_occupancy_per_set;
 	Stats::Scalar dramCache_mshr_hits;
 	Stats::Scalar dramCache_cpu_mshr_hits;
 	Stats::Scalar dramCache_writebuffer_hits;
 	Stats::Scalar dramCache_cpu_writebuffer_hits;
 	Stats::Scalar dramCache_max_gpu_dirty_lines; // we need to find the size of dirty line structure
+	// max number of gpu sets in dramcache
+	// - chaining kicks in only in cpu lines are lesser than low thresh
+	// - meaning gpu should be hungry and occupy a lots of lines in the cache
+	Stats::Scalar dramCache_max_gpu_lines;
 	Stats::Vector dramCache_mshr_miss_latency; // Total cycle latency of MSHR [0]-cpu [1]-gpu
 	Stats::Scalar dramCache_total_pred; // number of predictions made
 	Stats::Scalar dramCache_incorrect_pred; // number of miss predictions by predictor
@@ -255,6 +263,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Histogram fillsPerTurnAround;
 	Stats::Scalar dramCache_servicedByFillQ; // reads serviced by fillQ
 
+	Stats::Formula dramCache_max_gpu_occupancy; // % maximum gpu set occupancy in dramcache
 	Stats::Formula dramCache_hit_rate;
 	Stats::Formula dramCache_rd_hit_rate;
 	Stats::Formula dramCache_wr_hit_rate;
