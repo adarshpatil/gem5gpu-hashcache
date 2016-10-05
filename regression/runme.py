@@ -48,6 +48,8 @@ parser.add_argument('--dramcache', action='store_true', default=False,
                     help='flag to run with predefined dramcache, default false')
 parser.add_argument('--run', action='store_true', default=False,
                     help='flag to run, else default to checkpoint')
+parser.add_argument('--fast', action='store_true', default=False,
+                    help='flag to run in gem.fast')
 
 if not len(sys.argv)>1:
   print parser.print_help()
@@ -261,7 +263,10 @@ envs['LD_LIBRARY_PATH']= hsa+'/gcc44/gmp-4.1-build/lib:'+hsa+'/gcc44/mpfr-2.3.2-
 envs['NVIDIA_CUDA_SDK_LOCATION'] = hsa+'/NVIDIA_GPU_Computing_SDK/C'
 
 # form command to be executed
-command = main_prefix + '''/gem5/build/X86_VI_hammer_GPU/gem5.opt -r -e --outdir='''
+if args.fast:
+    command = main_prefix + '''/gem5/build/X86_VI_hammer_GPU/gem5.fast -r -e --outdir='''
+else:
+    command = main_prefix + '''/gem5/build/X86_VI_hammer_GPU/gem5.opt -r -e --outdir='''
 
 cpt_run_suffix = ''
 final_config = ''
