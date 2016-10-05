@@ -29,10 +29,11 @@
 #include "mem/dram_ctrl.hh"
 #include "mem/cache/mshr_queue.hh"
 #include "debug/DRAMCache.hh"
+#include "base/random.hh"
 
 #define DRAM_PKT_COUNT 2
 #define PREDICTION_LATENCY 5
-#undef MAPI_PREDICTOR
+#define MAPI_PREDICTOR
 
 class DRAMCacheCtrl : public DRAMCtrl
 {
@@ -195,6 +196,11 @@ class DRAMCacheCtrl : public DRAMCtrl
     typedef std::map <unsigned int, mac> predictorTable;
     // per core predictor
     static std::map<int, predictorTable> predictor;
+
+    // static prediction accuracy we want our predictor to have
+    static int predAccuracy;
+
+    Random randomPredictor;
 
     //since assoc is 1 - set = way
 	struct dramCacheSet_t
@@ -436,6 +442,9 @@ class DRAMCacheCtrl : public DRAMCtrl
     void processNextReqEvent();
 
     void processRespondEvent();
+    // in this function we have some stuff that is common between
+    // #define and #undef MAPI_PREDICTOR
+    void processRespondHelper();
 
     Tick recvAtomic(PacketPtr pkt);
 
@@ -453,9 +462,12 @@ class DRAMCacheCtrl : public DRAMCtrl
     void recvTimingResp(PacketPtr pkt);
 
     void doDRAMAccess(DRAMPacket* dram_pkt);
+
     // predictor functions
     uint64_t hash_pc (Addr pc);
     bool predict(ContextID contextId, Addr pc); // true for hit; false for miss
+    // takes static prediction accuracy & predicts true for hit; false for miss
+    bool predict_static(Addr blk_addr);
     void incMac(ContextID contextId, Addr pc);
     void decMac(ContextID contextId, Addr pc);
 

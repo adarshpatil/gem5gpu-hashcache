@@ -37,6 +37,8 @@ class DRAMCacheCtrl(DRAMCtrl):
 
     fill_buffer_size = Param.Unsigned(64, "Number of fill queue entries")
 
+    prediction_accuracy = Param.Unsigned(95, "Required prediction accuracy")
+
 # A single DDR3-1600 x64 channel (one command and address bus), with
 # timings based on a DDR3-1600 4 Gbit datasheet (Micron MT41J512M8) in
 # an 8x8 configuration.

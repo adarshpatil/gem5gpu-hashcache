@@ -18,6 +18,7 @@ using namespace Data;
 
 
 map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
+int DRAMCacheCtrl::predAccuracy;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
@@ -37,12 +38,13 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	fillHighThreshold(p->fill_high_thresh_perc),
 	fillBufferSize(p->fill_buffer_size),
 	cacheFillsThisTime(0), cacheWritesThisTime(0)
-
 {
 	DPRINTF(DRAMCache, "DRAMCacheCtrl constructor\n");
 	// determine the dram actual capacity from the DRAM config in Mbytes
 	uint64_t deviceCapacity = deviceSize / (1024 * 1024) * devicesPerRank
 			* ranksPerChannel;
+
+	DRAMCacheCtrl::predAccuracy = p->prediction_accuracy;
 
 	rowsPerBank = (1024 * 1024 * deviceCapacity)
             / (rowBufferSize * banksPerRank * ranksPerChannel);
@@ -71,6 +73,9 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	// DRAMCache totalRows = 64k
 	// DRAMCache sets = 960k
 	// Assoc is hard to increase; increasing dramCache_block_size maybe tricky
+
+	// we initalize a static seed for our randomPredictor
+	randomPredictor.init(3594);
 }
 
 void
@@ -811,6 +816,8 @@ DRAMCacheCtrl::processRespondEvent ()
 			{
 				pamQueueItr->second->isHit = isHit;
 				pamReq *pr = pamQueueItr->second;
+				DPRINTF(DRAMCache,"%s inPamQueue: true isHit: %d isPamComplete: %d\n",
+						 __func__,pr->isHit, pr->isPamComplete);
 				// this address has a PAM request
 				if (pr->isPamComplete)
 				{
@@ -854,7 +861,6 @@ DRAMCacheCtrl::processRespondEvent ()
 						pr->mshr->popTarget();
 
 						// copy data and respond to current packet
-						dram_pkt->pkt->allocate();
 						memcpy(dram_pkt->pkt->getPtr<uint8_t>(),
 								first_tgt_pkt->getPtr<uint8_t>(),
 								dramCache_block_size);
@@ -865,7 +871,6 @@ DRAMCacheCtrl::processRespondEvent ()
 						while (pr->mshr->hasTargets())
 						{
 							tgt_pkt = pr->mshr->getTarget ()->pkt;
-							tgt_pkt->allocate();
 							memcpy(tgt_pkt->getPtr<uint8_t>(),
 									first_tgt_pkt->getPtr<uint8_t>(),
 									dramCache_block_size);
@@ -961,6 +966,7 @@ DRAMCacheCtrl::processRespondEvent ()
 					}
 
 				}
+				processRespondHelper();
 				return;
 
 			}
@@ -990,7 +996,12 @@ DRAMCacheCtrl::processRespondEvent ()
 				dram_pkt->addr, dram_pkt->pkt->getAddr());
 		fatal("DRAMCache ctrl doesnt support single burst for read");
 	}
+	processRespondHelper();
+}
 
+void
+DRAMCacheCtrl::processRespondHelper()
+{
 	DRAMPacket* tmp = respQueue.front ();
 	respQueue.pop_front ();
 	delete tmp;
@@ -1426,7 +1437,11 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// prediction is done only for CPU requests, GPU requests are serial
 	if ( (pkt->cmd == MemCmd::ReadReq) && (pkt->req->contextId () != 31))
 	{
+#ifdef PASS_PC
 		if (predict(RubyPort::pcTable[cid][blk_addr], cid) == false)
+#else
+		if (predict_static(blk_addr) == false)
+#endif
 		{
 			// predicted as miss do PAM
 			// allocate in PAMQueue
@@ -1552,6 +1567,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 	{
 		pamQueueItr->second->isPamComplete = true;
 		pamReq *pr = pamQueueItr->second;
+		DPRINTF(DRAMCache,"%s inPamQueue: true isHit: %d\n", __func__, pr->isHit);
 		// found in PAM Queue
 		if (pr->isHit == -1)
 		{
@@ -1560,7 +1576,6 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			// into the first target of the MSHR for use incase of a miss
 			// (which is the clone_pkt we created for PAM requests)
 			PacketPtr tgt_pkt = pamQueueItr->second->mshr->getTarget()->pkt;
-			tgt_pkt->allocate();
 			memcpy(tgt_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
 					dramCache_block_size);
 			delete pkt;
@@ -1600,7 +1615,6 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			{
 				MSHR::Target *target = mshr->getTarget ();
 				Packet *tgt_pkt = target->pkt;
-				tgt_pkt->allocate();
 				memcpy(tgt_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
 							dramCache_block_size);
 				tgt_pkt->makeResponse();
@@ -2367,6 +2381,22 @@ DRAMCacheCtrl::predict(ContextID contextId, Addr pc)
 		return false;
 	else
 		return true;
+}
+
+bool
+DRAMCacheCtrl::predict_static(Addr blk_addr)
+{
+	unsigned int cacheBlock = blk_addr / dramCache_block_size;
+	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+
+	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)
+	{
+		// going to be a hit - predict true with predAccuracy
+		return (randomPredictor.random(0,100) > DRAMCacheCtrl::predAccuracy);
+	}
+	// going to be a miss - predict false with predAccuracy
+	return (!(randomPredictor.random(0,100) > DRAMCacheCtrl::predAccuracy));
 }
 
 void

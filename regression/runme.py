@@ -178,7 +178,7 @@ cpt_common_config = '''--work-begin-checkpoint-count=1
 run_common_config = '''--checkpoint-restore=1
 --restore-with-cpu=timing
 --standard-switch=1
---warmup-insts=500000
+--warmup-insts=250000000
 --caches
 --clusters=8
 --flush_kernel_end
@@ -223,7 +223,7 @@ cpt_common_config_cpu = '''--at-instruction
 run_common_config_cpu = '''--at-instruction
 --restore-with-cpu=timing
 --standard-switch=1
---warmup-insts=500000
+--warmup-insts=250000000
 --caches
 --sys-clock=2.5GHz
 --cpu-clock=2.5GHz
@@ -302,7 +302,8 @@ for benchmark in run_mix:
     if benchmark[1] == 'g':
         if args.run:
             cpt_run_suffix = '.run'
-            final_config = run_common_config + '\n--checkpoint-dir=' + suite_results_dir + '/'+ benchmark + '.cpt'
+            final_config = run_common_config + '\n--checkpoint-dir=' + results_dir + '/cpt/' + benchmark[0] + 'core-' + \
+             args.memory + 'G/' + benchmark + '.cpt'
             final_config = final_config + '\n--maxinsts=' + str(max_insts)
         else:
             cpt_run_suffix = '.cpt'
@@ -312,7 +313,8 @@ for benchmark in run_mix:
     elif benchmark[1] == 'c':
         if args.run:
             cpt_run_suffix = '.run'
-            final_config = run_common_config_cpu + '\n--checkpoint-dir=' + suite_results_dir + '/'+ benchmark + '.cpt'
+            final_config = run_common_config_cpu + '\n--checkpoint-dir=' + results_dir + '/cpt/' + benchmark[0] + 'core-' + \
+             args.memory + 'G/' + benchmark + '.cpt'
             final_config = final_config + '\n--maxinsts=' + str(max_insts) + '\n--checkpoint-restore=' + str(take_cpt_insts)
         else:
             cpt_run_suffix = '.cpt'
