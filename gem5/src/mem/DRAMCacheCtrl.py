@@ -24,7 +24,6 @@ class DRAMCacheCtrl(DRAMCtrl):
 
     mshrs = Param.Unsigned(128,"Number of MSHRs (max outstanding requests)")
     write_buffers = Param.Unsigned(32,"Number of write buffers")
-    demand_mshr_reserve = Param.Unsigned(1, "MSHRs reserved for demand access")
     tgts_per_mshr = Param.Unsigned(16,"Max number of accesses per MSHR")
     
     num_cores = Param.Unsigned("Number of CPU cores in the system")
@@ -211,7 +210,6 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     mem_sched_policy = 'fcfs'
 
     mshrs = 128
-    demand_mshr_reserve = 1
     tgts_per_mshr = 16
 
     # for dramcache this write theshold is (cache writes + cache fills)

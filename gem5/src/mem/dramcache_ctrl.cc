@@ -23,8 +23,8 @@ int DRAMCacheCtrl::predAccuracy;
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
 	dramCache_masterport (name () + ".dramcache_masterport",*this),
-	mshrQueue ("MSHRs", p->mshrs, 4, p->demand_mshr_reserve, MSHRQueue_MSHRs),
-	writeBuffer ("write buffer", p->write_buffers, p->mshrs + 1000, 0,
+	mshrQueue ("MSHRs", p->mshrs, p->read_buffer_size, 0, MSHRQueue_MSHRs),
+	writeBuffer ("write buffer", p->write_buffers, p->write_buffer_size, 0,
 	MSHRQueue_WriteBuffer), dramCache_size (p->dramcache_size),
 	dramCache_assoc (p->dramcache_assoc),
 	dramCache_block_size (p->dramcache_block_size),
@@ -33,8 +33,8 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	replacement_scheme (p->dramcache_replacement_scheme), totalRows (0),
 	system_cache_block_size (128), // hardcoded to 128
     num_sub_blocks_per_way (0), total_gpu_lines (0), total_gpu_dirty_lines (0),
-	order (0), numTarget (p->tgts_per_mshr), blocked (0), num_cores(p->num_cores),
-	dramCacheTimingMode(p->dramcache_timing),
+	order (0), numTarget (p->tgts_per_mshr), blocked (0), cacheMustSendRetry(false),
+	num_cores(p->num_cores), dramCacheTimingMode(p->dramcache_timing),
 	fillHighThreshold(p->fill_high_thresh_perc),
 	fillBufferSize(p->fill_buffer_size),
 	cacheFillsThisTime(0), cacheWritesThisTime(0)
@@ -412,7 +412,8 @@ DRAMCacheCtrl::processNextReqEvent()
     // pre-emptively set to false.  Overwrite if in READ_TO_WRITE
     // or WRITE_TO_READ state
     bool switched_cmd_type = false;
-    if (busState == READ_TO_WRITE) {
+    if (busState == READ_TO_WRITE)
+    {
         DPRINTF(DRAMCache, "Switching to writes after %d reads with %d reads "
                 "waiting\n", readsThisTime, readQueue.size());
 
@@ -472,7 +473,9 @@ DRAMCacheCtrl::processNextReqEvent()
                 // event for the next request
                 return;
             }
-        } else {
+        }
+        else
+        {
             // bool to check if there is a read to a free rank
             bool found_read = false;
 
@@ -536,12 +539,14 @@ DRAMCacheCtrl::processNextReqEvent()
             // transition to writing
             busState = READ_TO_WRITE;
         }
-    } else {
+    }
+    else
+    {
 
         // decide here if do we want to do fills or writes
 
         if (!writeQueue.empty() &&  (fillQueue.size() < fillHighThreshold
-                || writeQueue.size() > min(writeHighThreshold, fillHighThreshold)))
+                 || writeQueue.size() > min(writeHighThreshold, fillHighThreshold)))
 		{
 			// if writeQ is not empty and fillQ is lesser than high thresh or
 			// writeQ size is gerater than some high thresh (we use min of
@@ -601,7 +606,7 @@ DRAMCacheCtrl::processNextReqEvent()
                 (!writeQueue.empty() && fillQueue.size() > fillHighThreshold))
         {
             // write queue empty => service fills OR
-            // if fills have gone above high thesh => service fills
+        	// if fills have gone above high thesh => service fills
 
             bool found_fill = false;
 
@@ -635,8 +640,8 @@ DRAMCacheCtrl::processNextReqEvent()
         {
             // we should never reach here
             fatal("busState write; unable determine service fills or writes "
-                    "fillQ size %d writeQ size %d", fillQueue.size(), writeQueue.size());
-         }
+                      "fillQ size %d writeQ size %d", fillQueue.size(), writeQueue.size());
+        }
 
         // If we emptied the write or fill queue, or got sufficiently below the
         // threshold (using the minWritesPerSwitch as the hysteresis) and
@@ -654,6 +659,7 @@ DRAMCacheCtrl::processNextReqEvent()
             // also pause any further scheduling if there is really
             // nothing to do
         }
+
     }
 
     // It is possible that a refresh to another rank kicks things back into
@@ -734,6 +740,7 @@ DRAMCacheCtrl::processWriteRespondEvent()
 					PacketPtr pkt = new Packet(dram_pkt->pkt, false, true);
 					memcpy(pkt->getPtr<uint8_t>(), dram_pkt->pkt->getPtr<uint8_t>(),
 								dramCache_block_size);
+					pkt->popSenderState();
 					allocateWriteBuffer(pkt,1);
 				}
 			}
@@ -1353,6 +1360,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	if (blocked != 0)
 	{
 		DPRINTF(DRAMCache,"%s cache blocked %d", __func__, pkt->getAddr());
+		cacheMustSendRetry = true;
 		return false;
 	}
 
@@ -1398,6 +1406,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		if (mshr->getNumTargets () == numTarget)
 		{
 			noTargetMSHR = mshr;
+			warn("MSHR ran out of %d targets\n", numTarget);
 			setBlocked (Blocked_NoTargets);
 		}
 		return true;
@@ -1405,8 +1414,6 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 
 	// ADARSH check writeBuffer if there is outstanding write back
 	// service from writeBuffer only if the request is a read (accessAndRespond)
-	// if the request was a write it should go as a read req to memory
-	// we assume that memory will coalesce read and write in its queues
 	mshr = writeBuffer.findMatch (blk_addr, false);
 	if (mshr && pkt->isRead())
 	{
@@ -1662,7 +1669,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			pkt->cmdString(), pkt->getAddr(), pkt->getSize(), mshr->queue->index);
 
 	MSHRQueue *mq = mshr->queue;
-	bool wasFull = mq->isFull ();
+	bool wasFull = mq->isFull();
 
 	if (mshr == noTargetMSHR)
 	{
@@ -1764,7 +1771,9 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 
 	delete pkt;
 	mq->deallocate (mshr);
-	if (wasFull)
+	// we check here if we were full and deallocating has created capacity
+	// this is because we could have used the reserves to allocate WriteBuffers/MSHR
+	if (wasFull && (!mq->isFull()))
 		clearBlocked ((BlockedCause) mq->index);
 
 }
@@ -1973,6 +1982,7 @@ DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         totQLat += cmd_at - dram_pkt->entryTime;
         if(dram_pkt->pkt->req->contextId() == 31) {
              gpuQLat += cmd_at - dram_pkt->entryTime;
+             //bytesReadDRAMGPU += burstSize;
         }
         else {
             cpuQLat += cmd_at - dram_pkt->entryTime;
@@ -1982,6 +1992,8 @@ DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         if (row_hit)
             writeRowHits++;
         bytesWritten += burstSize;
+        //if (dram_pkt->pkt->req->contextId()==31)
+            //bytesWrittenGPU += burstSize;
         perBankWrBursts[dram_pkt->bankId]++;
     }
 }
@@ -2335,7 +2347,7 @@ DRAMCacheCtrl::DRAMCacheReqPacketQueue::sendDeferredPacket ()
 	PacketPtr pkt = cache.getTimingPacket();
 
 	if (pkt == NULL)
-		DPRINTF(DRAMCache, "sendDefferedPacket got no timing Packet");
+		DPRINTF(DRAMCache, "sendDefferedPacket got no timing Packet\n");
 	else
 	{
 		MSHR *mshr = dynamic_cast<MSHR*> (pkt->senderState);
@@ -2343,7 +2355,7 @@ DRAMCacheCtrl::DRAMCacheReqPacketQueue::sendDeferredPacket ()
 		waitingOnRetry = !masterPort.sendTimingReq (pkt);
 
 		if (waitingOnRetry){
-			DPRINTF(DRAMCache, "now waiting on retry");
+			DPRINTF(DRAMCache, "now waiting on retry\n");
 			delete pkt;
 		}
 		else{

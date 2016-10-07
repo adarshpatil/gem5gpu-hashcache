@@ -33,7 +33,7 @@
 
 #define DRAM_PKT_COUNT 2
 #define PREDICTION_LATENCY 5
-#define MAPI_PREDICTOR
+#undef MAPI_PREDICTOR
 
 class DRAMCacheCtrl : public DRAMCtrl
 {
@@ -157,6 +157,8 @@ class DRAMCacheCtrl : public DRAMCtrl
      * @sa #BlockedCause
      */
     uint8_t blocked;
+    // remember if we recvd a request when we were blocked because of MSHR/WB full
+    bool cacheMustSendRetry;
 
     int num_cores; //num of CPU cores in the system, needed for per core predictor
 
@@ -343,7 +345,10 @@ class DRAMCacheCtrl : public DRAMCtrl
         if (blocked == 0) {
             blocked_cycles[cause] += curCycle() - blockedCycle;
             port.clearBlocked();
+            if (cacheMustSendRetry)
+                port.sendRetryReq();
         }
+
     }
 
     /**

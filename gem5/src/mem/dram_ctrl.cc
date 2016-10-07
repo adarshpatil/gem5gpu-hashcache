@@ -1249,6 +1249,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         totQLat += cmd_at - dram_pkt->entryTime;
         if(dram_pkt->pkt->req->contextId() == 31) {
              gpuQLat += cmd_at - dram_pkt->entryTime;
+             //bytesReadDRAMGPU += burstSize;
         }
         else {
             cpuQLat += cmd_at - dram_pkt->entryTime;
@@ -1258,6 +1259,8 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         if (row_hit)
             writeRowHits++;
         bytesWritten += burstSize;
+        //if(dram_pkt->pkt->req->contextId() == 31)
+            //bytesWrittenGPU += burstSize;
         perBankWrBursts[dram_pkt->bankId]++;
     }
 }
@@ -2106,6 +2109,10 @@ DRAMCtrl::regStats()
         .name(name() + ".bytesReadDRAM")
         .desc("Total number of bytes read from DRAM");
 
+    bytesReadDRAMGPU
+        .name(name() + ".bytesReadDRAMGPU")
+        .desc("Total number of bytes read by GPU from DRAM");
+
     bytesReadWrQ
         .name(name() + ".bytesReadWrQ")
         .desc("Total number of bytes read from write queue");
@@ -2113,6 +2120,10 @@ DRAMCtrl::regStats()
     bytesWritten
         .name(name() + ".bytesWritten")
         .desc("Total number of bytes written to DRAM");
+
+    bytesWrittenGPU
+        .name(name() + ".bytesWrittenGPU")
+        .desc("Total number of bytes written by GPU to DRAM");
 
     bytesReadSys
         .name(name() + ".bytesReadSys")
@@ -2135,6 +2146,34 @@ DRAMCtrl::regStats()
         .precision(2);
 
     avgWrBW = (bytesWritten / 1000000) / simSeconds;
+
+    avgRdBWGPU
+        .name(name() + ".avgRdBWGPU")
+        .desc("Average DRAM read bandwidth of GPU in MiByte/s")
+        .precision(2);
+
+    avgRdBWGPU = (bytesReadDRAMGPU / 1000000) / simSeconds;
+
+    avgWrBWGPU
+        .name(name() + ".avgWrBWGPU")
+        .desc("Average achieved write bandwidth of GPU in MiByte/s")
+        .precision(2);
+
+    avgWrBWGPU = (bytesWrittenGPU / 1000000) / simSeconds;
+
+    avgRdBWCPU
+        .name(name() + ".avgRdBWCPU")
+        .desc("Average DRAM read bandwidth of CPU in MiByte/s")
+        .precision(2);
+
+    avgRdBWCPU = ((bytesReadDRAM - bytesReadDRAMGPU) / 1000000) / simSeconds;
+
+    avgWrBWCPU
+        .name(name() + ".avgWrBWCPU")
+        .desc("Average achieved write bandwidth of CPU in MiByte/s")
+        .precision(2);
+
+    avgWrBWCPU = ((bytesWritten - bytesWrittenGPU) / 1000000) / simSeconds;
 
     avgRdBWSys
         .name(name() + ".avgRdBWSys")
@@ -2274,7 +2313,7 @@ DRAMCtrl::drainResume()
 
 DRAMCtrl::MemoryPort::MemoryPort(const std::string& name, DRAMCtrl& _memory)
     : QueuedSlavePort(name, &_memory, queue), queue(_memory, *this),
-      memory(_memory), blocked(false),sendRetryEvent(this)
+      memory(_memory), blocked(false)
 { }
 
 AddrRangeList
@@ -2319,13 +2358,6 @@ DRAMCtrl::MemoryPort::setBlocked()
     assert(!blocked);
     DPRINTF(DRAM, "Port is blocking new requests\n");
     blocked = true;
-    // if we already scheduled a retry in this cycle, but it has not yet
-    // happened, cancel it
-    if (sendRetryEvent.scheduled()) {
-        owner.deschedule(sendRetryEvent);
-        DPRINTF(DRAM, "Port descheduled retry\n");
-        mustSendRetry = true;
-    }
 }
 
 void
@@ -2334,20 +2366,7 @@ DRAMCtrl::MemoryPort::clearBlocked()
     assert(blocked);
     DPRINTF(DRAM, "Port is accepting new requests\n");
     blocked = false;
-    if (mustSendRetry) {
-        // @TODO: need to find a better time (next cycle?)
-        owner.schedule(sendRetryEvent, curTick() + 1);
-    }
-}
 
-void
-DRAMCtrl::MemoryPort::processSendRetry()
-{
-    DPRINTF(DRAM, "Port is sending retry\n");
-
-    // reset the flag and call retry
-    mustSendRetry = false;
-    sendRetryReq();
 }
 
 DRAMCtrl*

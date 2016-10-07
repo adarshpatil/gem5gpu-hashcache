@@ -123,14 +123,6 @@ class DRAMCtrl : public AbstractMemory
         bool recvTimingReq(PacketPtr);
 
         virtual AddrRangeList getAddrRanges() const;
-
-      protected:
-        void processSendRetry();
-
-        EventWrapper<MemoryPort,
-                     &MemoryPort::processSendRetry> sendRetryEvent;
-
-
     };
 
     /**
@@ -800,8 +792,10 @@ class DRAMCtrl : public AbstractMemory
     Stats::Scalar readBursts;
     Stats::Scalar writeBursts;
     Stats::Scalar bytesReadDRAM;
+    Stats::Scalar bytesReadDRAMGPU;
     Stats::Scalar bytesReadWrQ;
     Stats::Scalar bytesWritten;
+    Stats::Scalar bytesWrittenGPU;
     Stats::Scalar bytesReadSys;
     Stats::Scalar bytesWrittenSys;
     Stats::Scalar servicedByWrQ;
@@ -841,7 +835,11 @@ class DRAMCtrl : public AbstractMemory
 
     // Average bandwidth
     Stats::Formula avgRdBW;
+    Stats::Formula avgRdBWGPU;
+    Stats::Formula avgRdBWCPU;
     Stats::Formula avgWrBW;
+    Stats::Formula avgWrBWGPU;
+    Stats::Formula avgWrBWCPU;
     Stats::Formula avgRdBWSys;
     Stats::Formula avgWrBWSys;
     Stats::Formula peakBW;
