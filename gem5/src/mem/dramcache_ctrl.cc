@@ -904,6 +904,7 @@ DRAMCacheCtrl::processRespondEvent ()
 						// change the tag directory
 						set[cacheSet].tag = cacheTag;
 						set[cacheSet].dirty = false;
+						set[cacheSet].valid = true;
 
 						// add to fillQueue since we encountered a miss
 						// create a packet and add to fillQueue
@@ -921,10 +922,11 @@ DRAMCacheCtrl::processRespondEvent ()
 
 					// deallocate MSHR and pamQueue entry
 					MSHRQueue *mq = pr->mshr->queue;
+					bool wasFull = mq->isFull();
 					mq->deallocate(pr->mshr);
 					delete pr;
 					pamQueue.erase(pamQueueItr);
-					if (mq->isFull ())
+					if (wasFull && !mq->isFull ())
 						clearBlocked ((BlockedCause) mq->index);
 				}
 				else
@@ -955,8 +957,9 @@ DRAMCacheCtrl::processRespondEvent ()
 
 						// deallocate MSHR
 						MSHRQueue *mq = pr->mshr->queue;
+						bool wasFull = mq->isFull();
 						mq->deallocate(pr->mshr);
-						if (mq->isFull())
+						if (wasFull && !mq->isFull())
 							clearBlocked ((BlockedCause) mq->index);
 
 					}
@@ -1630,7 +1633,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			}
 
 			mq->deallocate(pr->mshr);
-			if (wasFull)
+			if (wasFull && !mq->isFull())
 				clearBlocked ((BlockedCause) mq->index);
 
 			// update tags
@@ -1649,6 +1652,16 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			// change the tag directory
 			set[cacheSet].tag = cacheTag;
 			set[cacheSet].dirty = false;
+			set[cacheSet].valid = true;
+
+			// add to fillQueue since we encountered a miss
+			// create a packet and add to fillQueue
+			// we can delete the packet as we never derefence it
+			RequestPtr req = new Request(pkt->getAddr(),
+					dramCache_block_size, 0, Request::wbMasterId);
+			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
+			addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
+			delete clone_pkt;
 		}
 
 		delete pkt->req;
@@ -1720,6 +1733,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			// change the tag directory
 			set[cacheSet].tag = cacheTag;
 			set[cacheSet].dirty = false;
+			set[cacheSet].valid = true;
 
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue

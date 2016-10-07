@@ -33,7 +33,7 @@
 
 #define DRAM_PKT_COUNT 2
 #define PREDICTION_LATENCY 5
-#undef MAPI_PREDICTOR
+#define MAPI_PREDICTOR
 
 class DRAMCacheCtrl : public DRAMCtrl
 {
@@ -346,7 +346,10 @@ class DRAMCacheCtrl : public DRAMCtrl
             blocked_cycles[cause] += curCycle() - blockedCycle;
             port.clearBlocked();
             if (cacheMustSendRetry)
+            {
                 port.sendRetryReq();
+                cacheMustSendRetry = false;
+            }
         }
 
     }
