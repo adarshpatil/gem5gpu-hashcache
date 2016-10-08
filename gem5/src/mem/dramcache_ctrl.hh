@@ -181,6 +181,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 		int isHit; // -1 initially; 0 miss; 1 hit
 		bool isPamComplete; // true if parallel memory request has returned
 		MSHR* mshr;
+		PacketPtr pkt;
 		pamReq()
 		{
 			isPamComplete = false;
@@ -309,7 +310,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     bool doCacheLookup(PacketPtr pkt);  // check hit/miss; returns true for hit
 
-    void doWriteBack(Addr evictAddr);
+    void doWriteBack(Addr evictAddr, int contextId);
 
     Addr blockAlign(Addr addr) const { return (addr & ~(Addr(dramCache_block_size - 1))); }
 

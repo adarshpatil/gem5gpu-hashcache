@@ -412,9 +412,10 @@ DRAMCtrl::decodeAddr(PacketPtr pkt, Addr dramPktAddr, unsigned size,
     // create the corresponding DRAM packet with the entry time and
     // ready time set to the current tick, the latter will be updated
     // later
+    assert(pkt->req->hasContextId());
     uint16_t bank_id = banksPerRank * rank + bank;
     return new DRAMPacket(pkt, isRead, rank, bank, row, bank_id, dramPktAddr,
-                          size, ranks[rank]->banks[bank], *ranks[rank]);
+            pkt->req->contextId(),size, ranks[rank]->banks[bank], *ranks[rank]);
 }
 
 void
@@ -474,6 +475,7 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
                 burst_helper = new BurstHelper(pktCount);
             }
 
+            assert(pkt->req->hasContextId());
             DRAMPacket* dram_pkt = decodeAddr(pkt, addr, size, true);
             dram_pkt->burstHelper = burst_helper;
 
@@ -537,6 +539,7 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
         // if the item was not merged we need to create a new write
         // and enqueue it
         if (!merged) {
+            assert(pkt->req->hasContextId());
             DRAMPacket* dram_pkt = decodeAddr(pkt, addr, size, false);
 
             assert(writeQueue.size() < writeBufferSize);
@@ -1247,9 +1250,9 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
         totBusLat += tBURST;
         totQLat += cmd_at - dram_pkt->entryTime;
-        if(dram_pkt->pkt->req->contextId() == 31) {
+        if(dram_pkt->contextId == 31) {
              gpuQLat += cmd_at - dram_pkt->entryTime;
-             //bytesReadDRAMGPU += burstSize;
+             bytesReadDRAMGPU += burstSize;
         }
         else {
             cpuQLat += cmd_at - dram_pkt->entryTime;
@@ -1259,8 +1262,8 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         if (row_hit)
             writeRowHits++;
         bytesWritten += burstSize;
-        //if(dram_pkt->pkt->req->contextId() == 31)
-            //bytesWrittenGPU += burstSize;
+        if(dram_pkt->contextId == 31)
+            bytesWrittenGPU += burstSize;
         perBankWrBursts[dram_pkt->bankId]++;
     }
 }

@@ -441,6 +441,7 @@ class DRAMCtrl : public AbstractMemory
         const bool isRead;
         // ADARSH true for fill requests - used in dramcache
         bool isFill;
+        int contextId;
 
         /** Will be populated by address decoder */
         const uint8_t rank;
@@ -477,11 +478,12 @@ class DRAMCtrl : public AbstractMemory
         Rank& rankRef;
 
         DRAMPacket(PacketPtr _pkt, bool is_read, uint8_t _rank, uint8_t _bank,
-                   uint32_t _row, uint16_t bank_id, Addr _addr,
+                   uint32_t _row, uint16_t bank_id, Addr _addr, int contextId,
                    unsigned int _size, Bank& bank_ref, Rank& rank_ref)
             : entryTime(curTick()), readyTime(curTick()),
-              pkt(_pkt), isRead(is_read), isFill(false), rank(_rank), bank(_bank), row(_row),
-              bankId(bank_id), addr(_addr), size(_size), burstHelper(NULL),
+              pkt(_pkt), isRead(is_read), isFill(false), contextId(contextId),
+			  rank(_rank), bank(_bank), row(_row), bankId(bank_id),
+			  addr(_addr), size(_size), burstHelper(NULL),
               bankRef(bank_ref), rankRef(rank_ref)
         { }
 

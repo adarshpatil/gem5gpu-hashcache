@@ -91,6 +91,7 @@ DRAMCacheCtrl::init ()
 		set[i].tag = 0;
 		set[i].valid = false;
 		set[i].dirty = false;
+		set[i].isGPUOwned = false;
 		/*set[i].used = new bool[num_sub_blocks_per_way];
 		set[i].accessed = new uint64_t[num_sub_blocks_per_way];
 		set[i].written = new uint64_t[num_sub_blocks_per_way];
@@ -286,13 +287,14 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 }
 
 void
-DRAMCacheCtrl::doWriteBack(Addr evictAddr)
+DRAMCacheCtrl::doWriteBack(Addr evictAddr, int contextId)
 {
 	// write back needed as this line is dirty
 	// allocate writeBuffer for this block
 	// we create a dummy read req and send to access() to get data
 	Request *req = new Request(evictAddr, dramCache_block_size, 0,
 					Request::wbMasterId);
+	req->setContextId(contextId);
 	PacketPtr dummyRdPkt = new Packet(req, MemCmd::ReadReq);
 	PacketPtr wbPkt = new Packet(req, MemCmd::WriteReq);
 	dummyRdPkt->allocate();
@@ -375,13 +377,15 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 	DPRINTF(DRAMCache, "Address: %lld Rank %d Bank %d Row %d\n", dramPktAddr,
 			rank, bank, row);
 
+	assert(pkt->req->hasContextId());
 	// create the corresponding DRAM packet with the entry time and
 	// ready time set to the current tick, the latter will be updated
 	// later
 	uint16_t bank_id = banksPerRank * rank + bank;
 	return new DRAMPacket (pkt, isRead, rank, bank, row, bank_id, dramPktAddr,
-			size, ranks[rank]->banks[bank], *ranks[rank]);
+			pkt->req->contextId(), size, ranks[rank]->banks[bank], *ranks[rank]);
 }
+
 
 void
 DRAMCacheCtrl::processNextReqEvent()
@@ -677,6 +681,7 @@ DRAMCacheCtrl::processNextReqEvent()
     }
 }
 
+
 void
 DRAMCacheCtrl::processWriteRespondEvent()
 {
@@ -722,14 +727,14 @@ DRAMCacheCtrl::processWriteRespondEvent()
 					if (set[cacheSet].dirty)
 					{
 						Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-						doWriteBack(evictAddr);
+						doWriteBack(evictAddr, set[cacheSet].isGPUOwned?31:0);
 					}
-					else
-					{
-						// evicted cache line clean
-						set[cacheSet].tag = cacheTag;
-						set[cacheSet].dirty = true;
-					}
+					// update tags
+					set[cacheSet].tag = cacheTag;
+					set[cacheSet].dirty = true;
+					set[cacheSet].isGPUOwned =
+							dram_pkt->pkt->req->contextId() == 31 ? true:false;
+
 				}
 				else
 				{
@@ -737,10 +742,13 @@ DRAMCacheCtrl::processWriteRespondEvent()
 					// we should copy the data into new packet
 					// the data set in the packet is dynamic data
 					// the constructor has allocated space but not copied data
-					PacketPtr pkt = new Packet(dram_pkt->pkt, false, true);
+					RequestPtr req = new Request(dram_pkt->pkt->getAddr(),
+							dramCache_block_size, 0, Request::wbMasterId);
+					req->setContextId(dram_pkt->pkt->req->contextId());
+					PacketPtr pkt = new Packet(req, MemCmd::WriteReq);
+					pkt->allocate();
 					memcpy(pkt->getPtr<uint8_t>(), dram_pkt->pkt->getPtr<uint8_t>(),
-								dramCache_block_size);
-					pkt->popSenderState();
+							dramCache_block_size);
 					allocateWriteBuffer(pkt,1);
 				}
 			}
@@ -819,8 +827,13 @@ DRAMCacheCtrl::processRespondEvent ()
 #ifdef MAPI_PREDICTOR
 			auto pamQueueItr =  pamQueue.find(dram_pkt->pkt->getAddr());
 			bool isInPamQueue = (pamQueueItr != pamQueue.end());
-			if (isInPamQueue)
+			if (isInPamQueue && (pamQueueItr->second->pkt == dram_pkt->pkt))
 			{
+				// the second part of the condition is for this
+				// only the packet that created pamReq packet comes here
+				// second condition is evaluated only if first condition is true
+
+
 				pamQueueItr->second->isHit = isHit;
 				pamReq *pr = pamQueueItr->second;
 				DPRINTF(DRAMCache,"%s inPamQueue: true isHit: %d isPamComplete: %d\n",
@@ -872,6 +885,9 @@ DRAMCacheCtrl::processRespondEvent ()
 								first_tgt_pkt->getPtr<uint8_t>(),
 								dramCache_block_size);
 						dram_pkt->pkt->makeResponse();
+						//keep the contextId for later
+						assert(dram_pkt->pkt->req->hasContextId());
+						int cid = dram_pkt->pkt->req->contextId();
 						respond(dram_pkt->pkt, frontendLatency+backendLatency);
 
 						// copy data and respond to all packets in MSHR
@@ -899,18 +915,21 @@ DRAMCacheCtrl::processRespondEvent ()
 
 						// this block needs to be evicted
 						if (set[cacheSet].dirty)
-							doWriteBack(evictAddr);
+							doWriteBack(evictAddr, set[cacheSet].isGPUOwned?31:0);
 
 						// change the tag directory
 						set[cacheSet].tag = cacheTag;
 						set[cacheSet].dirty = false;
 						set[cacheSet].valid = true;
+						set[cacheSet].isGPUOwned =
+								dram_pkt->pkt->req->contextId() == 31 ? true:false;
 
 						// add to fillQueue since we encountered a miss
 						// create a packet and add to fillQueue
 						// we can delete the packet as we never derefence it
 						RequestPtr req = new Request(first_tgt_pkt->getAddr(),
 								dramCache_block_size, 0, Request::wbMasterId);
+						req->setContextId(cid);
 						PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
 						addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
 
@@ -985,7 +1004,34 @@ DRAMCacheCtrl::processRespondEvent ()
 			if (!isHit)  // miss send cache fill request
 			{
 				// send cache fill to master port - master port sends from MSHR
-				allocateMissBuffer (dram_pkt->pkt, 1, true);
+
+				// check if there is already an MSHR allocated for this addr
+				// this MSHR could have been allocated because of another PAM Req
+				Addr blk_addr = blockAlign(dram_pkt->pkt->getAddr());
+				MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
+				if (mshr)
+				{
+					// mshr found - add target
+					DPRINTF(DRAMCache, "coalescing MSHR in %s, addr %#d\n",
+							__func__, dram_pkt->pkt->getAddr());
+					dramCache_mshr_hits++;
+					if (dram_pkt->contextId != 31)
+						dramCache_cpu_mshr_hits++;
+
+					mshr->allocateTarget (dram_pkt->pkt, dram_pkt->pkt->headerDelay, order++);
+					if (mshr->getNumTargets () == numTarget)
+					{
+						noTargetMSHR = mshr;
+						warn("MSHR ran out of %d targets\n", numTarget);
+						setBlocked (Blocked_NoTargets);
+					}
+
+				}
+				else
+				{
+					// mshr not found allocate new MSHR
+					allocateMissBuffer (dram_pkt->pkt, 1, true);
+				}
 			}
 			else
 			{
@@ -1136,6 +1182,7 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
                 burst_helper = new BurstHelper(pktCount);
             }
 
+            assert(pkt->req->hasContextId());
             DRAMPacket* dram_pkt = decodeAddr(pkt, addr, size, true);
             dram_pkt->burstHelper = burst_helper;
 
@@ -1215,6 +1262,7 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
 			burst_helper = new BurstHelper(pktCount);
 		}
 
+		assert(pkt->req->hasContextId());
 		DRAMPacket* dram_pkt = decodeAddr(pkt, addr, size, false);
 		dram_pkt->burstHelper = burst_helper;
 
@@ -1295,6 +1343,7 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 	for (int cnt = 0; cnt < pktCount; ++cnt) {
 		dramCache_fillBursts++;
 
+		assert(pkt->req->hasContextId());
 		DRAMPacket* dram_pkt = decodeAddr(pkt, addr, burstSize, false);
 		dram_pkt->requestAddr = pkt->getAddr();
 		dram_pkt->isFill = true;
@@ -1445,7 +1494,9 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 #ifdef MAPI_PREDICTOR
 	// do prediction only for readReq, decide if this access should be SAM/PAM
 	// prediction is done only for CPU requests, GPU requests are serial
-	if ( (pkt->cmd == MemCmd::ReadReq) && (pkt->req->contextId () != 31))
+	// we check if the readQueue is not full else this request will be retried
+	if ( (pkt->cmd == MemCmd::ReadReq) && (!readQueueFull (DRAM_PKT_COUNT))
+			&& (pkt->req->contextId() != 31))
 	{
 #ifdef PASS_PC
 		if (predict(RubyPort::pcTable[cid][blk_addr], cid) == false)
@@ -1453,6 +1504,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		if (predict_static(blk_addr) == false)
 #endif
 		{
+			DPRINTF(DRAMCache,"sending PAM request for addr %d", pkt->getAddr());
 			// predicted as miss do PAM
 			// allocate in PAMQueue
 			// create an entry in MSHR, which will send a request to memory
@@ -1465,6 +1517,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 			//   there was an MSHR it would have been coalesced above
 			// 2) we create a new read packet as PAM request can return later than
 			//    actual DRAMCache access
+			pamQueue[blk_addr]->pkt = pkt;
 			PacketPtr clone_pkt = new Packet (pkt, false, true);
 			pamQueue[blk_addr]->mshr =
 					allocateMissBuffer(clone_pkt, PREDICTION_LATENCY, true);
@@ -1570,6 +1623,14 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 {
 	assert(pkt->isResponse ());
 
+
+	MSHR *mshr = dynamic_cast<MSHR*> (pkt->senderState);
+
+	assert(mshr);
+
+	DPRINTF(DRAMCache, "Handling response %s for addr %d size %d MSHR %d\n",
+				pkt->cmdString(), pkt->getAddr(), pkt->getSize(), mshr->queue->index);
+
 #ifdef MAPI_PREDICTOR
 	auto pamQueueItr =  pamQueue.find(pkt->getAddr());
 	bool isInPamQueue = (pamQueueItr != pamQueue.end());
@@ -1599,11 +1660,6 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		}
 		else if (pr->isHit == false)
 		{
-			// iterate through MSHR and make response and pop target
-			MSHR *mshr = dynamic_cast<MSHR*> (pkt->senderState);
-
-			assert(mshr);
-
 			// the mshr in the recieved packet should be same as PAMQueue mshr
 			assert(mshr==pr->mshr);
 
@@ -1647,18 +1703,22 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 
 			// this block needs to be evicted
 			if (set[cacheSet].dirty)
-				doWriteBack(evictAddr);
+				doWriteBack(evictAddr, set[cacheSet].isGPUOwned?31:0);
 
 			// change the tag directory
 			set[cacheSet].tag = cacheTag;
 			set[cacheSet].dirty = false;
 			set[cacheSet].valid = true;
+			set[cacheSet].isGPUOwned =
+					pkt->req->contextId() == 31 ? true:false;
 
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
 			RequestPtr req = new Request(pkt->getAddr(),
 					dramCache_block_size, 0, Request::wbMasterId);
+			assert(pkt->req->hasContextId());
+			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
 			addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
 			delete clone_pkt;
@@ -1673,13 +1733,6 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 
 	}
 #endif
-
-	MSHR *mshr = dynamic_cast<MSHR*> (pkt->senderState);
-
-	assert(mshr);
-
-	DPRINTF(DRAMCache, "Handling response %s for addr %d size %d MSHR %d\n",
-			pkt->cmdString(), pkt->getAddr(), pkt->getSize(), mshr->queue->index);
 
 	MSHRQueue *mq = mshr->queue;
 	bool wasFull = mq->isFull();
@@ -1706,12 +1759,15 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			set[cacheSet].tag = cacheTag;
 			set[cacheSet].dirty = false;
 			set[cacheSet].valid = true;
+			set[cacheSet].isGPUOwned = pkt->req->contextId() == 31 ? true:false;
 
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
 			RequestPtr req = new Request(pkt->getAddr(),
 					dramCache_block_size, 0, Request::wbMasterId);
+			assert(pkt->req->hasContextId());
+			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
 			addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
 			delete clone_pkt;
@@ -1728,18 +1784,21 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 					__func__,evictAddr ,cacheSet, set[cacheSet].dirty);
 			// this block needs to be evicted
 			if (set[cacheSet].dirty)
-				doWriteBack(evictAddr);
+				doWriteBack(evictAddr, set[cacheSet].isGPUOwned?31:0);
 
 			// change the tag directory
 			set[cacheSet].tag = cacheTag;
 			set[cacheSet].dirty = false;
 			set[cacheSet].valid = true;
+			set[cacheSet].isGPUOwned = pkt->req->contextId() == 31 ? true:false;
 
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
 			RequestPtr req = new Request(pkt->getAddr(),
 					dramCache_block_size, 0, Request::wbMasterId);
+			assert(pkt->req->hasContextId());
+			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
 			addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
 			delete clone_pkt;
@@ -1994,9 +2053,9 @@ DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
         totBusLat += tBURST;
         totQLat += cmd_at - dram_pkt->entryTime;
-        if(dram_pkt->pkt->req->contextId() == 31) {
+        if(dram_pkt->contextId == 31) {
              gpuQLat += cmd_at - dram_pkt->entryTime;
-             //bytesReadDRAMGPU += burstSize;
+             bytesReadDRAMGPU += burstSize;
         }
         else {
             cpuQLat += cmd_at - dram_pkt->entryTime;
@@ -2006,8 +2065,8 @@ DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         if (row_hit)
             writeRowHits++;
         bytesWritten += burstSize;
-        //if (dram_pkt->pkt->req->contextId()==31)
-            //bytesWrittenGPU += burstSize;
+        if (dram_pkt->contextId==31)
+            bytesWrittenGPU += burstSize;
         perBankWrBursts[dram_pkt->bankId]++;
     }
 }
