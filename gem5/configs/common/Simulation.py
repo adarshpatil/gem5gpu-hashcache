@@ -692,6 +692,10 @@ def run(options, root, testsys, cpu_class):
     else:
         if options.fast_forward:
             m5.stats.reset()
+        if options.warmup_insts:
+            print "Dumping warmup stats and reset stats"
+            m5.stats.dump()
+            m5.stats.reset()
         print "**** REAL SIMULATION ****"
         flag = 1
         if options.maxinsts:
