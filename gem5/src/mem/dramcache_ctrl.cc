@@ -851,6 +851,7 @@ DRAMCacheCtrl::processRespondEvent ()
 
 						// throw away first target as this was the clone_pkt
 						// created to access the DRAM and also delete clone_pkt
+						assert(pr->mshr->getNumTargets()>=1);
 						delete pr->mshr->getTarget()->pkt;
 						pr->mshr->popTarget();
 
@@ -870,6 +871,7 @@ DRAMCacheCtrl::processRespondEvent ()
 						// first target packet contains data (clone_pkt) as per
 						// our mechanism in recvTimingResp
 						PacketPtr tgt_pkt, first_tgt_pkt;
+						assert(pr->mshr->getNumTargets()>=1);
 						first_tgt_pkt = pr->mshr->getTarget()->pkt;
 
 						Tick miss_latency = curTick () - pr->mshr->getTarget()->recvTime;
@@ -962,6 +964,7 @@ DRAMCacheCtrl::processRespondEvent ()
 
 						// throw away first target as that was the clone_pkt
 						// created to send to DRAM
+						assert(pr->mshr->getNumTargets()>=1);
 						delete pr->mshr->getTarget()->pkt;
 						pr->mshr->popTarget();
 
@@ -1646,7 +1649,8 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			// we put the data returned from this packet, that came from DRAM
 			// into the first target of the MSHR for use incase of a miss
 			// (which is the clone_pkt we created for PAM requests)
-			PacketPtr tgt_pkt = pamQueueItr->second->mshr->getTarget()->pkt;
+			assert(pr->mshr->getNumTargets()>=1);
+			PacketPtr tgt_pkt = pr->mshr->getTarget()->pkt;
 			memcpy(tgt_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
 					dramCache_block_size);
 			delete pkt;
@@ -1674,6 +1678,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 
 			// throw away first target as it was the clone_pkt used to
 			// send request to DRAM
+			assert(mshr->getNumTargets()>=1);
 			delete mshr->getTarget()->pkt;
 			mshr->popTarget();
 
@@ -1746,6 +1751,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 	// write allocate policy - read resp do cache things
 	if(mshr->queue->index == 0 && pkt->isRead())
 	{
+		assert(mshr->getNumTargets()>=1);
 		MSHR::Target *initial_tgt = mshr->getTarget ();
 		// find the cache block, set id and tag
 		// fix the tag entry now that memory access has returned
@@ -2373,6 +2379,7 @@ DRAMCacheCtrl::getTimingPacket ()
 		return NULL;
 
 	// use request from 1st target
+	assert(mshr->getNumTargets()>=1);
 	PacketPtr tgt_pkt = mshr->getTarget ()->pkt;
 	PacketPtr pkt;
 
