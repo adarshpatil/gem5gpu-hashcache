@@ -24,7 +24,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
 	dramCache_masterport (name () + ".dramcache_masterport",*this),
 	mshrQueue ("MSHRs", p->mshrs, p->read_buffer_size, 0, MSHRQueue_MSHRs),
-	writeBuffer ("write buffer", p->write_buffers, p->write_buffer_size, 0,
+	writeBuffer ("write buffer", p->write_buffers, p->write_buffer_size+500, 0,
 	MSHRQueue_WriteBuffer), dramCache_size (p->dramcache_size),
 	dramCache_assoc (p->dramcache_assoc),
 	dramCache_block_size (p->dramcache_block_size),
@@ -386,7 +386,6 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 			pkt->req->contextId(), size, ranks[rank]->banks[bank], *ranks[rank]);
 }
 
-
 void
 DRAMCacheCtrl::processNextReqEvent()
 {
@@ -681,7 +680,6 @@ DRAMCacheCtrl::processNextReqEvent()
     }
 }
 
-
 void
 DRAMCacheCtrl::processWriteRespondEvent()
 {
@@ -912,7 +910,7 @@ DRAMCacheCtrl::processRespondEvent ()
 						unsigned int cacheTag = cacheBlock / dramCache_num_sets;
 
 						Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-						DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d isClean %d\n",
+						DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d dirty %d\n",
 								__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
 
 						// this block needs to be evicted
@@ -1219,6 +1217,40 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
     if (burst_helper != NULL)
         burst_helper->burstsServiced = pktsServicedByWrQFillQ;
 
+#ifdef MAPI_PREDICTOR
+    // if the read didnt get serviced even partially by fillQ or WrQ
+	// do prediction only for readReq, decide if this access should be SAM/PAM
+	// prediction is done only for CPU requests, GPU requests are serial
+
+	Addr blk_addr = blockAlign(pkt->getAddr());
+	if ( (pktsServicedByWrQFillQ == 0) && (pkt->req->contextId() != 31))
+	{
+#ifdef PASS_PC
+		if (predict(RubyPort::pcTable[cid][blk_addr], cid) == false)
+#else
+		if (predict_static(blk_addr) == false)
+#endif
+		{
+			DPRINTF(DRAMCache,"sending PAM request for addr %d\n", pkt->getAddr());
+			// predicted as miss do PAM
+			// allocate in PAMQueue
+			// create an entry in MSHR, which will send a request to memory
+
+			// we use pamQueue to track PAM requests
+			pamQueue[blk_addr] = new pamReq();
+
+			// create MSHR entry
+			// 1) we are sure that MSHR entry doesn't exist for this address since if
+			//   there was an MSHR it would have been coalesced above
+			// 2) we create a new read packet as PAM request can return later than
+			//    actual DRAMCache access
+			pamQueue[blk_addr]->pkt = pkt;
+			PacketPtr clone_pkt = new Packet (pkt, false, true);
+			pamQueue[blk_addr]->mshr =
+					allocateMissBuffer(clone_pkt, PREDICTION_LATENCY, true);
+		}
+	}
+#endif
     // If we are not already scheduled to get a request out of the
     // queue, do so now
     if (!nextReqEvent.scheduled()) {
@@ -1494,40 +1526,6 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	RubyPort::mruPcAddrList[cid].push_front(blk_addr);
 #endif
 
-#ifdef MAPI_PREDICTOR
-	// do prediction only for readReq, decide if this access should be SAM/PAM
-	// prediction is done only for CPU requests, GPU requests are serial
-	// we check if the readQueue is not full else this request will be retried
-	if ( (pkt->cmd == MemCmd::ReadReq) && (!readQueueFull (DRAM_PKT_COUNT))
-			&& (pkt->req->contextId() != 31))
-	{
-#ifdef PASS_PC
-		if (predict(RubyPort::pcTable[cid][blk_addr], cid) == false)
-#else
-		if (predict_static(blk_addr) == false)
-#endif
-		{
-			DPRINTF(DRAMCache,"sending PAM request for addr %d", pkt->getAddr());
-			// predicted as miss do PAM
-			// allocate in PAMQueue
-			// create an entry in MSHR, which will send a request to memory
-
-			// we use pamQueue to track PAM requests
-			pamQueue[blk_addr] = new pamReq();
-
-			// create MSHR entry
-			// 1) we are sure that MSHR entry doesn't exist for this address since if
-			//   there was an MSHR it would have been coalesced above
-			// 2) we create a new read packet as PAM request can return later than
-			//    actual DRAMCache access
-			pamQueue[blk_addr]->pkt = pkt;
-			PacketPtr clone_pkt = new Packet (pkt, false, true);
-			pamQueue[blk_addr]->mshr =
-					allocateMissBuffer(clone_pkt, PREDICTION_LATENCY, true);
-		}
-	}
-#endif
-
 	// Find out how many dram packets a pkt translates to
 	// If the burst size is equal or larger than the pkt size, then a pkt
 	// translates to only one dram packet. Otherwise, a pkt translates to
@@ -1637,7 +1635,9 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 #ifdef MAPI_PREDICTOR
 	auto pamQueueItr =  pamQueue.find(pkt->getAddr());
 	bool isInPamQueue = (pamQueueItr != pamQueue.end());
-	if (isInPamQueue)
+	// should be in pamQueue and the resp should correspond to a MSHR request
+	// as only read requests are predicted
+	if (isInPamQueue && (mshr->queue->index==0))
 	{
 		pamQueueItr->second->isPamComplete = true;
 		pamReq *pr = pamQueueItr->second;
@@ -1703,7 +1703,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			unsigned int cacheTag = cacheBlock / dramCache_num_sets;
 
 			Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-			DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d isClean %d\n",
+			DPRINTF(DRAMCache, "%s PAM Evicting addr %d in cacheSet %d dirty %d\n",
 					__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
 
 			// this block needs to be evicted
@@ -1748,7 +1748,6 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		noTargetMSHR = NULL;
 	}
 
-	// write allocate policy - read resp do cache things
 	if(mshr->queue->index == 0 && pkt->isRead())
 	{
 		assert(mshr->getNumTargets()>=1);
@@ -1786,7 +1785,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		else if (set[cacheSet].tag != cacheTag)
 		{
 			Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-			DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d isClean %d\n",
+			DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d dirty %d\n",
 					__func__,evictAddr ,cacheSet, set[cacheSet].dirty);
 			// this block needs to be evicted
 			if (set[cacheSet].dirty)
