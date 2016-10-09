@@ -1218,12 +1218,16 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
         burst_helper->burstsServiced = pktsServicedByWrQFillQ;
 
 #ifdef MAPI_PREDICTOR
-    // if the read didnt get serviced even partially by fillQ or WrQ
-	// do prediction only for readReq, decide if this access should be SAM/PAM
-	// prediction is done only for CPU requests, GPU requests are serial
-
+    // 1) do prediction only for readReq
+	// 2) if the read didnt get serviced even partially by fillQ or WrQ
+	// 3) prediction is done only for CPU requests, GPU requests are serial
+    // 4) we also check if there is not an already existing pamQ entry
+    //    this happens when there is a misprediction and the request is a hit in cache.
+    //    for this case MSHR is deallocated but pamQ entry is retained for recvTimingResp
 	Addr blk_addr = blockAlign(pkt->getAddr());
-	if ( (pktsServicedByWrQFillQ == 0) && (pkt->req->contextId() != 31))
+	auto pamQueueItr =  pamQueue.find(pkt->getAddr());
+	bool isInPamQueue = (pamQueueItr != pamQueue.end());
+	if ( (pktsServicedByWrQFillQ == 0) && (pkt->req->contextId() != 31) && !isInPamQueue)
 	{
 #ifdef PASS_PC
 		if (predict(RubyPort::pcTable[cid][blk_addr], cid) == false)
