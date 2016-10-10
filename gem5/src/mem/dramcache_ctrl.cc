@@ -958,8 +958,6 @@ DRAMCacheCtrl::processRespondEvent ()
 						access(dram_pkt->pkt);
 						respond(dram_pkt->pkt, frontendLatency+backendLatency);
 
-						assert(pr->mshr->getNumTargets()>=1);
-
 						// throw away first target as that was the clone_pkt
 						// created to send to DRAM
 						assert(pr->mshr->getNumTargets()>=1);
@@ -978,9 +976,21 @@ DRAMCacheCtrl::processRespondEvent ()
 						// deallocate MSHR
 						MSHRQueue *mq = pr->mshr->queue;
 						bool wasFull = mq->isFull();
+						bool inService = pr->mshr->inService;
 						mq->deallocate(pr->mshr);
 						if (wasFull && !mq->isFull())
 							clearBlocked ((BlockedCause) mq->index);
+
+						// if mshr is not inService i.e. mshr request has not
+						// sent to memory, deallocate pamQ entry here itself
+						if (!inService)
+						{
+							DPRINTF(DRAMCache, "PAM MSHR not in service, removing pamQ entry\n");
+							delete dram_pkt->pkt->req;
+							delete dram_pkt->pkt;
+							delete pr;
+							pamQueue.erase(pamQueueItr);
+						}
 
 					}
 					else
@@ -2533,4 +2543,6 @@ DRAMCacheCtrl::respond(PacketPtr pkt, Tick latency)
 	pkt->headerDelay = pkt->payloadDelay = 0;
 
 	port.schedTimingResp(pkt, response_time);
+	DPRINTF(DRAMCache, "scheduling response contextid %d addr %d\n",
+			pkt->req->contextId(), pkt->getAddr());
 }
