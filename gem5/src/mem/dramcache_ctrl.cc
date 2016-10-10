@@ -986,8 +986,6 @@ DRAMCacheCtrl::processRespondEvent ()
 						if (!inService)
 						{
 							DPRINTF(DRAMCache, "PAM MSHR not in service, removing pamQ entry\n");
-							delete dram_pkt->pkt->req;
-							delete dram_pkt->pkt;
 							delete pr;
 							pamQueue.erase(pamQueueItr);
 						}
