@@ -222,8 +222,19 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				{
 					dramCache_gpu_replaced_cpu++;
 					total_gpu_lines++;
+					if(total_gpu_lines > dramCache_max_gpu_lines.value())
+						dramCache_max_gpu_lines = total_gpu_lines;
+
 				}
 			}
+			else
+			{
+				// set is invalid
+				total_gpu_lines++;
+				if(total_gpu_lines > dramCache_max_gpu_lines.value())
+					dramCache_max_gpu_lines = total_gpu_lines;
+			}
+
 		}
 		else // it is a CPU req
 		{
@@ -244,6 +255,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				if (set[cacheSet].isGPUOwned) // set occupied by GPU line
 				{
 					dramCache_cpu_replaced_gpu++;
+					if (set[cacheSet].dirty)  // GPU dirty line will be evicted
+						total_gpu_dirty_lines--;
 					total_gpu_lines--;
 				}
 				else // set occupied by CPU line
