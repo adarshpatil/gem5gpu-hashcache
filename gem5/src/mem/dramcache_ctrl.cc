@@ -273,7 +273,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		else
 		{
 			dramCache_write_misses++;
-			if (pkt->req->contextId () == 31) // gpu requesting a write
+			// gpu requesting a write and existing line was clean and not GPU owned
+			if (pkt->req->contextId () == 31 && !(set[cacheSet].dirty || set[cacheSet].isGPUOwned))
 			{
 				total_gpu_dirty_lines++;
 				if (total_gpu_dirty_lines
