@@ -2308,9 +2308,9 @@ DRAMCacheCtrl::regStats ()
 
 	dramCache_gpu_hit_rate =
 			((dramCache_read_hits + dramCache_write_hits) - dramCache_cpu_hits)
-			/ ((dramCache_read_hits + dramCache_write_hits) - dramCache_cpu_hits)
-			+ ((dramCache_read_misses + dramCache_write_misses)
-					- dramCache_cpu_misses);
+			/ (((dramCache_read_hits + dramCache_write_hits) - dramCache_cpu_hits)
+			   + ((dramCache_read_misses + dramCache_write_misses)
+					- dramCache_cpu_misses));
 
 	dramCache_correct_pred
 		.name ( name() + "dramCache_correct_pred")
