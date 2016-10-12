@@ -2514,17 +2514,24 @@ DRAMCacheCtrl::predict(ContextID contextId, Addr pc)
 bool
 DRAMCacheCtrl::predict_static(Addr blk_addr)
 {
+	dramCache_total_pred++;
 	unsigned int cacheBlock = blk_addr / dramCache_block_size;
 	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
 	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
-
+	bool pred;
 	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)
 	{
 		// going to be a hit - predict true with predAccuracy
-		return (randomPredictor.random(0,100) > DRAMCacheCtrl::predAccuracy);
+		pred = randomPredictor.random(0,100) > DRAMCacheCtrl::predAccuracy;
+		if (pred == false)
+			dramCache_incorrect_pred++;
+		return pred;
 	}
 	// going to be a miss - predict false with predAccuracy
-	return (!(randomPredictor.random(0,100) > DRAMCacheCtrl::predAccuracy));
+	pred = !(randomPredictor.random(0,100) > DRAMCacheCtrl::predAccuracy);
+	if (pred == true)
+		dramCache_incorrect_pred++;
+	return pred;
 }
 
 void
