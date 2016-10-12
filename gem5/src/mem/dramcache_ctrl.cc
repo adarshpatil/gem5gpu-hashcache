@@ -274,7 +274,9 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		{
 			dramCache_write_misses++;
 			// gpu requesting a write and existing line was clean and not GPU owned
-			if (pkt->req->contextId () == 31 && !(set[cacheSet].dirty || set[cacheSet].isGPUOwned))
+			if (pkt->req->contextId () == 31 &&
+					!(set[cacheSet].dirty && set[cacheSet].isGPUOwned) &&
+					dramCache_write_allocate)
 			{
 				total_gpu_dirty_lines++;
 				if (total_gpu_dirty_lines
@@ -1404,21 +1406,30 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 	for (int cnt = 0; cnt < pktCount; ++cnt) {
 		dramCache_fillBursts++;
 
-		assert(pkt->req->hasContextId());
-		DRAMPacket* dram_pkt = decodeAddr(pkt, addr, burstSize, false);
-		dram_pkt->requestAddr = pkt->getAddr();
-		dram_pkt->isFill = true;
+        // see if we can merge with an existing item in the fill
+        // queue and keep track of whether we have merged or not
+        bool merged = isInFillQueue.find(make_pair(pkt->getAddr(),addr)) !=
+            isInFillQueue.end();
 
-		assert(fillQueue.size() < fillBufferSize);
+        // if the item was not merged we need to enqueue it
+        if (!merged)
+        {
+            assert(pkt->req->hasContextId());
+            DRAMPacket* dram_pkt = decodeAddr(pkt, addr, burstSize, false);
+            dram_pkt->requestAddr = pkt->getAddr();
+            dram_pkt->isFill = true;
 
-		DPRINTF(DRAMCache, "Adding to fill queue addr:%d\n", pkt->getAddr());
+            assert(fillQueue.size() < fillBufferSize);
 
-		fillQueue.push_back(dram_pkt);
-		isInFillQueue.insert(make_pair(pkt->getAddr(),addr));
+            DPRINTF(DRAMCache, "Adding to fill queue addr:%d\n", pkt->getAddr());
 
-		dramCache_avgFillQLen = fillQueue.size();
+            fillQueue.push_back(dram_pkt);
+            isInFillQueue.insert(make_pair(pkt->getAddr(),addr));
 
-		assert(fillQueue.size() == isInFillQueue.size());
+            dramCache_avgFillQLen = fillQueue.size();
+
+            assert(fillQueue.size() == isInFillQueue.size());
+        }
 
 		addr = addr + 1;
 	}
