@@ -200,7 +200,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			DPRINTF(DRAMCache, "GPU request %d is a %s miss\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
 
-			dramCache_gpu_occupancy_per_set.sample(cacheSet);
+			if (pkt->isRead() || (pkt->isWrite() && dramCache_write_allocate))
+				dramCache_gpu_occupancy_per_set.sample(cacheSet);
 
 			if (set[cacheSet].valid) // valid line - causes eviction
 			{

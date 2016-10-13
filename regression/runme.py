@@ -180,7 +180,7 @@ cpt_common_config = '''--work-begin-checkpoint-count=1
 run_common_config = '''--checkpoint-restore=1
 --restore-with-cpu=timing
 --standard-switch=1
---warmup-insts=250000000
+--warmup-insts=100000000
 --caches
 --clusters=8
 --flush_kernel_end
@@ -225,7 +225,7 @@ cpt_common_config_cpu = '''--at-instruction
 run_common_config_cpu = '''--at-instruction
 --restore-with-cpu=timing
 --standard-switch=1
---warmup-insts=250000000
+--warmup-insts=100000000
 --caches
 --sys-clock=2.5GHz
 --cpu-clock=2.5GHz
