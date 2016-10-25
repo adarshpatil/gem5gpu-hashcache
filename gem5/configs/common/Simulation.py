@@ -476,6 +476,7 @@ def run(options, root, testsys, cpu_class):
         testsys.switch_cpus = switch_cpus
         switch_cpu_list = [(testsys.cpu[i], switch_cpus[i]) for i in xrange(np)]
 
+    old_old_cpu =  testsys.cpu[0]
     if options.repeat_switch:
         switch_class = getCPUClass(options.cpu_type)[0]
         if switch_class.require_caches() and \
@@ -646,7 +647,7 @@ def run(options, root, testsys, cpu_class):
             exit_event = m5.simulate(10000)
         print "Switched CPUS @ tick %s" % (m5.curTick())
 
-        m5.switchCpus(testsys, switch_cpu_list)
+        m5.switchCpus(testsys, switch_cpu_list, options.gpuapp_in_workload, False, None)
 
         if options.standard_switch:
             print "Switch at instruction count:%d" % \
@@ -659,8 +660,11 @@ def run(options, root, testsys, cpu_class):
                 exit_event = m5.simulate(options.standard_switch)
             print "Switching CPUS @ tick %s" % (m5.curTick())
             print "Simulation ends instruction count:%d" % \
-                    (testsys.switch_cpus_1[0].max_insts_any_thread)
-            m5.switchCpus(testsys, switch_cpu_list1)
+                    (testsys.switch_cpus_1[1].max_insts_any_thread)
+            if options.run_only_cpu:
+                m5.switchCpus(testsys, switch_cpu_list1, options.gpuapp_in_workload, False, old_old_cpu)
+            else:
+                m5.switchCpus(testsys, switch_cpu_list1, options.gpuapp_in_workload, True, old_old_cpu)
 
     # If we're taking and restoring checkpoints, use checkpoint_dir
     # option only for finding the checkpoints to restore from.  This

@@ -270,6 +270,9 @@ def addSEOptions(parser):
                       help="Absolute path stderr redirection for the benchmark")
     parser.add_option("--gpuapp_in_workload", action="store_true", default=False,
                       help="use if workload has a gpu app [to set maxinsts]")
+    parser.add_option("--run_only_cpu", action="store_true", default=False,
+                      help="use if workload has a gpu app but you want to run"\
+                      " only cpus; switches off cpu0 which runs gpu app")
 
 
 def addFSOptions(parser):

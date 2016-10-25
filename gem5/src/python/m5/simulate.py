@@ -232,16 +232,24 @@ def _changeMemoryMode(system, mode):
     else:
         print "System already in target mode. Memory mode unchanged."
 
-def switchCpus(system, cpuList, verbose=True):
+def switchCpus(system, cpuList, gpuapp_in_workload, secondSwitch, old_old_cpu, verbose=True):
     """Switch CPUs in a system.
 
     Note: This method may switch the memory mode of the system if that
     is required by the CPUs. It may also flush all caches in the
     system.
 
+    1. When doing simulation with gem5-gpu, we switch out core0 (running Rodinia)
+    after restoring from checkpoint, i.e. core0 does not run in warmup
+    we set switchedOut to False again when secondSwitch is True (warmup to detailed)
+    2. secondSwitch is passed here as False both times if we want to run_only_cpu
+    (see Simulation.py)
+
     Arguments:
       system -- Simulated system.
       cpuList -- (old_cpu, new_cpu) tuples
+      secondSwitch -- if this is the secondSwitch we have to switch CPU0 back in
+      old_old_cpu -- if
     """
 
     if verbose:
@@ -275,9 +283,9 @@ def switchCpus(system, cpuList, verbose=True):
             raise RuntimeError, \
                 "%s and %s require different memory modes." % (new_cpu,
                                                                new_cpus[0])
-        if old_cpu.switchedOut():
-            raise RuntimeError, \
-                "Old CPU (%s) is inactive." % (new_cpu,)
+        #if old_cpu.switchedOut():
+        #    raise RuntimeError, \
+        #        "Old CPU (%s) is inactive." % (new_cpu,)
         if not old_cpu.support_take_over():
             raise RuntimeError, \
                 "Old CPU (%s) does not support CPU handover." % (old_cpu,)
@@ -288,10 +296,6 @@ def switchCpus(system, cpuList, verbose=True):
         raise RuntimeError, "Invalid memory mode (%s)" % memory_mode_name
 
     drain()
-
-    # Now all of the CPUs are ready to be switched out
-    for old_cpu, new_cpu in cpuList:
-        old_cpu.switchOut()
 
     # Change the memory mode if required. We check if this is needed
     # to avoid printing a warning if no switch was performed.
@@ -305,7 +309,17 @@ def switchCpus(system, cpuList, verbose=True):
 
         _changeMemoryMode(system, memory_mode)
 
+    # Now all of the CPUs are ready to be switched out
+    flag = (not gpuapp_in_workload)
     for old_cpu, new_cpu in cpuList:
-        new_cpu.takeOverFrom(old_cpu)
+        if flag:
+            old_cpu.switchOut()
+            new_cpu.takeOverFrom(old_cpu)
+        else:
+            if secondSwitch:
+                new_cpu.takeOverFrom(old_old_cpu)
+            elif not old_cpu.switchedOut():
+                old_cpu.switchOut()
+            flag = 1
 
 from internal.core import disableAllListeners
