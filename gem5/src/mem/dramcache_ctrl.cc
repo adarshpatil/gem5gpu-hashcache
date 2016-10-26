@@ -35,8 +35,8 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     num_sub_blocks_per_way (0), total_gpu_lines (0), total_gpu_dirty_lines (0),
 	order (0), numTarget (p->tgts_per_mshr), blocked (0), cacheMustSendRetry(false),
 	num_cores(p->num_cores), dramCacheTimingMode(p->dramcache_timing),
-	fillHighThreshold(p->fill_high_thresh_perc),
 	fillBufferSize(p->fill_buffer_size),
+	fillHighThreshold(fillBufferSize * p->fill_high_thresh_perc / 100.0),
 	cacheFillsThisTime(0), cacheWritesThisTime(0)
 {
 	DPRINTF(DRAMCache, "DRAMCacheCtrl constructor\n");

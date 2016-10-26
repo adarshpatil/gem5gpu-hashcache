@@ -164,8 +164,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     bool dramCacheTimingMode;
 
-    const uint32_t fillHighThreshold;
     const uint32_t fillBufferSize;
+    const uint32_t fillHighThreshold;
 
     uint32_t cacheFillsThisTime;
     uint32_t cacheWritesThisTime;
