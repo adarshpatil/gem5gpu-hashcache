@@ -2532,13 +2532,13 @@ DRAMCacheCtrl::predict_static(Addr blk_addr)
 	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)
 	{
 		// going to be a hit - predict true with predAccuracy
-		pred = randomPredictor.random(0,100) > DRAMCacheCtrl::predAccuracy;
+		pred = (randomPredictor.random(0,100) < DRAMCacheCtrl::predAccuracy);
 		if (pred == false)
 			dramCache_incorrect_pred++;
 		return pred;
 	}
 	// going to be a miss - predict false with predAccuracy
-	pred = !(randomPredictor.random(0,100) > DRAMCacheCtrl::predAccuracy);
+	pred = !(randomPredictor.random(0,100) < DRAMCacheCtrl::predAccuracy);
 	if (pred == true)
 		dramCache_incorrect_pred++;
 	return pred;

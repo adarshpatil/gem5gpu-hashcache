@@ -50,6 +50,9 @@ parser.add_argument('--run', action='store_true', default=False,
                     help='flag to run, else default to checkpoint')
 parser.add_argument('--fast', action='store_true', default=False,
                     help='flag to run in gem.fast')
+parser.add_argument('--run_only_cpu', action='store_true', default=False,
+                    help='run only cpu cores using the gpu checkpoint')
+
 
 if not len(sys.argv)>1:
   print parser.print_help()
@@ -334,6 +337,12 @@ for benchmark in run_mix:
             final_config = run_common_config + '\n--checkpoint-dir=' + results_dir + '/cpt/' + benchmark[0] + 'core-' + \
              args.memory + 'G/' + benchmark + '.cpt'
             final_config = final_config + '\n--maxinsts=' + str(max_insts)
+        elif args.run_only_cpu:
+            cpt_run_suffix = '.cpurun'
+            final_config = run_common_config + '\n--checkpoint-dir=' + results_dir + '/cpt/' + benchmark[0] + 'core-' + \
+             args.memory + 'G/' + benchmark + '.cpt'
+            final_config = final_config + '\n--maxinsts=' + str(max_insts)
+            final_config = final_config + '\n--run_only_cpu'
         else:
             cpt_run_suffix = '.cpt'
             final_config = cpt_common_config
@@ -365,7 +374,7 @@ for benchmark in run_mix:
 
     if args.dramcache:
         final_config = final_config + '\n--dramcache'
-        if args.run:
+        if (args.run or args.run_only_cpu):
             final_config = final_config + '\n--dramcache_timing'
 
     final_config = final_config + '\n--num-cpus=' + str(num_cores)
