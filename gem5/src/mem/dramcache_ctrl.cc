@@ -623,7 +623,7 @@ DRAMCacheCtrl::processNextReqEvent()
 			++cacheWritesThisTime;
 		}
         else if(writeQueue.empty() ||
-                (!writeQueue.empty() && fillQueue.size() > fillHighThreshold))
+                (!writeQueue.empty() && fillQueue.size() >= fillHighThreshold))
         {
             // write queue empty => service fills OR
         	// if fills have gone above high thesh => service fills
