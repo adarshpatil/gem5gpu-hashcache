@@ -303,7 +303,7 @@ particlefilter_float.cmd = [particlefilter_float.executable] + ['-x', '128', '-y
 heartwall = LiveProcess()
 heartwall.executable = binary_dir + 'gem5_fusion_heartwall'
 data = data_dir + 'test.avi'
-heartwall.cmd = [heartwall.executable] + [data] + ['10']
+heartwall.cmd = [heartwall.executable] + [data] + ['5']
 
 # nn - needs fixing panic: Tried to read unmapped address 0.
 nn = LiveProcess()
