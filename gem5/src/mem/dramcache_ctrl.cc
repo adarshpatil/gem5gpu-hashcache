@@ -76,6 +76,8 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 
 	// we initalize a static seed for our randomPredictor
 	randomPredictor.init(3594);
+
+	max_gpu_lines_sample_counter = 0;
 }
 
 void
@@ -125,9 +127,17 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 	assert(cacheSet >= 0);
 	assert(cacheSet < dramCache_num_sets);
 
-	total_gpu_lines = count(isGPUOwned.begin(), isGPUOwned.end(), true);
-	if(total_gpu_lines > dramCache_max_gpu_dirty_lines.value())
-		dramCache_max_gpu_dirty_lines = total_gpu_lines;
+	if ( pkt->req->contextId() == 31 )
+	{
+		// sample max_gpu_lines once in every 10 GPU accesses
+		max_gpu_lines_sample_counter = (max_gpu_lines_sample_counter + 1)%10;
+		if (max_gpu_lines_sample_counter == 0)
+		{
+			total_gpu_lines = count(isGPUOwned.begin(), isGPUOwned.end(), true);
+			if(total_gpu_lines > dramCache_max_gpu_lines.value())
+				dramCache_max_gpu_lines = total_gpu_lines;
+		}
+	}
 
 	// check if the tag matches and line is valid
 	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)

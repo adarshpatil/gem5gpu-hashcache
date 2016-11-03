@@ -241,6 +241,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 
 	struct dramCacheSet_t * set;
 	std::vector<bool> isGPUOwned;
+	// counter for how often to sample max_gpu_lines
+	int max_gpu_lines_sample_counter;
 
 	Stats::Scalar dramCache_read_hits;
 	Stats::Scalar dramCache_read_misses;
