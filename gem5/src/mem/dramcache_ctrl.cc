@@ -85,13 +85,14 @@ DRAMCacheCtrl::init ()
 	set = new dramCacheSet_t[dramCache_num_sets];
 	DPRINTF(DRAMCache, "dramCache_num_sets: %d\n", dramCache_num_sets);
 
+	isGPUOwned.resize(dramCache_num_sets);
+	isGPUOwned.assign(dramCache_num_sets, false);
 	// initialize sub block counter for each set - num_cache_blocks_per_way
 	for (int i = 0; i < dramCache_num_sets; i++)
 	{
 		set[i].tag = 0;
 		set[i].valid = false;
 		set[i].dirty = false;
-		set[i].isGPUOwned = false;
 		/*set[i].used = new bool[num_sub_blocks_per_way];
 		set[i].accessed = new uint64_t[num_sub_blocks_per_way];
 		set[i].written = new uint64_t[num_sub_blocks_per_way];
@@ -124,6 +125,10 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 	assert(cacheSet >= 0);
 	assert(cacheSet < dramCache_num_sets);
 
+	total_gpu_lines = count(isGPUOwned.begin(), isGPUOwned.end(), true);
+	if(total_gpu_lines > dramCache_max_gpu_dirty_lines.value())
+		dramCache_max_gpu_dirty_lines = total_gpu_lines;
+
 	// check if the tag matches and line is valid
 	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)
 	{
@@ -133,12 +138,9 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			DPRINTF(DRAMCache, "GPU request %d is a %s hit\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
 
-			if (!set[cacheSet].isGPUOwned) // was CPU owned
+			if (!isGPUOwned[cacheSet]) // was CPU owned
 			{
-				set[cacheSet].isGPUOwned = true;
-				total_gpu_lines++;
-				if(total_gpu_lines > dramCache_max_gpu_lines.value())
-					dramCache_max_gpu_lines = total_gpu_lines;
+				isGPUOwned[cacheSet] = true;
 
 				switched_to_gpu_line++;
 			}
@@ -148,11 +150,10 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			DPRINTF(DRAMCache, "CPU request %d is a %s hit\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
 
-			if (set[cacheSet].isGPUOwned) // was a GPU line before
+			if (isGPUOwned[cacheSet]) // was a GPU line before
 			{
-				set[cacheSet].isGPUOwned = false;
+				isGPUOwned[cacheSet] = false;
 				switched_to_cpu_line++;
-				total_gpu_lines--;
 			}
 			dramCache_cpu_hits++;
 		}
@@ -163,7 +164,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		{
 			dramCache_write_hits++;
 
-			if (!set[cacheSet].dirty && set[cacheSet].isGPUOwned) // write to a clean line & GPU owned
+			if (!set[cacheSet].dirty && isGPUOwned[cacheSet]) // write to a clean line & GPU owned
 			{
 				total_gpu_dirty_lines++;
 				if (total_gpu_dirty_lines
@@ -213,7 +214,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 					if (pkt->isRead ())
 						dramCache_write_backs_on_read++;
 				}
-				if (set[cacheSet].isGPUOwned) //set occupied by GPU line
+				if (isGPUOwned[cacheSet]) //set occupied by GPU line
 				{
 					// gpu req replacing gpu line
 					if (set[cacheSet].dirty)  // GPU dirty line will be evicted
@@ -222,18 +223,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				else // set occupied by CPU line
 				{
 					dramCache_gpu_replaced_cpu++;
-					total_gpu_lines++;
-					if(total_gpu_lines > dramCache_max_gpu_lines.value())
-						dramCache_max_gpu_lines = total_gpu_lines;
 
 				}
-			}
-			else
-			{
-				// set is invalid
-				total_gpu_lines++;
-				if(total_gpu_lines > dramCache_max_gpu_lines.value())
-					dramCache_max_gpu_lines = total_gpu_lines;
 			}
 
 		}
@@ -253,12 +244,11 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 					if (pkt->isRead ())
 						dramCache_write_backs_on_read++;
 				}
-				if (set[cacheSet].isGPUOwned) // set occupied by GPU line
+				if (isGPUOwned[cacheSet]) // set occupied by GPU line
 				{
 					dramCache_cpu_replaced_gpu++;
 					if (set[cacheSet].dirty)  // GPU dirty line will be evicted
 						total_gpu_dirty_lines--;
-					total_gpu_lines--;
 				}
 				else // set occupied by CPU line
 				{
@@ -276,7 +266,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			dramCache_write_misses++;
 			// gpu requesting a write and existing line was clean and not GPU owned
 			if (pkt->req->contextId () == 31 &&
-					!(set[cacheSet].dirty && set[cacheSet].isGPUOwned) &&
+					!(set[cacheSet].dirty && isGPUOwned[cacheSet]) &&
 					dramCache_write_allocate)
 			{
 				total_gpu_dirty_lines++;
@@ -742,12 +732,12 @@ DRAMCacheCtrl::processWriteRespondEvent()
 					if (set[cacheSet].dirty)
 					{
 						Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-						doWriteBack(evictAddr, set[cacheSet].isGPUOwned?31:0);
+						doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
 					}
 					// update tags
 					set[cacheSet].tag = cacheTag;
 					set[cacheSet].dirty = true;
-					set[cacheSet].isGPUOwned =
+					isGPUOwned[cacheSet] =
 							dram_pkt->pkt->req->contextId() == 31 ? true:false;
 
 				}
@@ -932,13 +922,13 @@ DRAMCacheCtrl::processRespondEvent ()
 
 						// this block needs to be evicted
 						if (set[cacheSet].dirty)
-							doWriteBack(evictAddr, set[cacheSet].isGPUOwned?31:0);
+							doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
 
 						// change the tag directory
 						set[cacheSet].tag = cacheTag;
 						set[cacheSet].dirty = false;
 						set[cacheSet].valid = true;
-						set[cacheSet].isGPUOwned =
+						isGPUOwned[cacheSet] =
 								dram_pkt->pkt->req->contextId() == 31 ? true:false;
 
 						// add to fillQueue since we encountered a miss
@@ -1263,7 +1253,8 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 		if (predict_static(blk_addr) == false)
 #endif
 		{
-			DPRINTF(DRAMCache,"sending PAM request for addr %d\n", pkt->getAddr());
+			DPRINTF(DRAMCache,"sending PAM request for addr %d contextId %d\n",
+					pkt->getAddr(), pkt->req->contextId());
 			// predicted as miss do PAM
 			// allocate in PAMQueue
 			// create an entry in MSHR, which will send a request to memory
@@ -1755,13 +1746,13 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 
 			// this block needs to be evicted
 			if (set[cacheSet].dirty)
-				doWriteBack(evictAddr, set[cacheSet].isGPUOwned?31:0);
+				doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
 
 			// change the tag directory
 			set[cacheSet].tag = cacheTag;
 			set[cacheSet].dirty = false;
 			set[cacheSet].valid = true;
-			set[cacheSet].isGPUOwned =
+			isGPUOwned[cacheSet] =
 					pkt->req->contextId() == 31 ? true:false;
 
 			// add to fillQueue since we encountered a miss
@@ -1811,7 +1802,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			set[cacheSet].tag = cacheTag;
 			set[cacheSet].dirty = false;
 			set[cacheSet].valid = true;
-			set[cacheSet].isGPUOwned = pkt->req->contextId() == 31 ? true:false;
+			isGPUOwned[cacheSet] = pkt->req->contextId() == 31 ? true:false;
 
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue
@@ -1836,13 +1827,13 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 					__func__,evictAddr ,cacheSet, set[cacheSet].dirty);
 			// this block needs to be evicted
 			if (set[cacheSet].dirty)
-				doWriteBack(evictAddr, set[cacheSet].isGPUOwned?31:0);
+				doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
 
 			// change the tag directory
 			set[cacheSet].tag = cacheTag;
 			set[cacheSet].dirty = false;
 			set[cacheSet].valid = true;
-			set[cacheSet].isGPUOwned = pkt->req->contextId() == 31 ? true:false;
+			isGPUOwned[cacheSet] = pkt->req->contextId() == 31 ? true:false;
 
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue

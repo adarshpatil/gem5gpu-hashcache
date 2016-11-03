@@ -17,6 +17,7 @@
 #include <string>
 #include <set>
 #include <map>
+#include <vector>
 
 #include "base/statistics.hh"
 #include "enums/AddrMap.hh"
@@ -224,7 +225,9 @@ class DRAMCacheCtrl : public DRAMCtrl
 
 	    // here are entries for each way! but we assume assoc=1 for now
 	    // this should go into lruStackEntry_t if the assoc is increased
-	    bool isGPUOwned;
+
+        // we moved this out to an independent array for faster access
+	    //bool isGPUOwned;
 	    uint64_t tag;
 	    bool     valid;
 	    bool     dirty;
@@ -237,6 +240,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	};
 
 	struct dramCacheSet_t * set;
+	std::vector<bool> isGPUOwned;
 
 	Stats::Scalar dramCache_read_hits;
 	Stats::Scalar dramCache_read_misses;
