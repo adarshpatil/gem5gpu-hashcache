@@ -659,8 +659,12 @@ def run(options, root, testsys, cpu_class):
             else:
                 exit_event = m5.simulate(options.standard_switch)
             print "Switching CPUS @ tick %s" % (m5.curTick())
-            print "Simulation ends instruction count:%d" % \
+            if (np > 1):
+                print "Simulation ends instruction count:%d" % \
                     (testsys.switch_cpus_1[1].max_insts_any_thread)
+            else:
+                print "Simulation ends instruction count:%d" % \
+                    (testsys.switch_cpus_1[0].max_insts_any_thread)
             if options.run_only_cpu:
                 m5.switchCpus(testsys, switch_cpu_list1, options.gpuapp_in_workload, False, old_old_cpu)
             else:

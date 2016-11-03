@@ -1253,9 +1253,13 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         if(dram_pkt->contextId == 31) {
              gpuQLat += cmd_at - dram_pkt->entryTime;
              bytesReadDRAMGPU += burstSize;
+             gpuMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+             gpuBusLat += tBURST;
         }
         else {
             cpuQLat += cmd_at - dram_pkt->entryTime;
+            cpuMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+            cpuBusLat += tBURST;
         }
     } else {
         ++writesThisTime;
@@ -2005,9 +2009,26 @@ DRAMCtrl::regStats()
             .name(name() + ".cpuQLat")
             .desc("ticks spent queuing for CPU Requests");
 
+    cpuMemAccLat
+        .name(name() + ".cpuMemAccLat")
+        .desc("ticks spent from burst creation until serviced "
+              "by the DRAM for CPU Req");
+
+    cpuBusLat
+        .name(name() + ".cpuBusLat")
+        .desc("ticks spent in databus transfers for CPU Requests");
+
     gpuQLat
             .name(name() + ".gpuQLat")
             .desc("Total ticks spent queuing for GPU Requests");
+
+    gpuMemAccLat
+        .name(name() + ".gpuMemAccLat")
+        .desc("ticks spent from burst creation until serviced "
+              "by the DRAM for GPU Req");
+    gpuBusLat
+        .name(name() + ".gpuBusLat")
+        .desc("ticks spent in databus transfers for GPU Requests");
 
     avgQLat
         .name(name() + ".avgQLat")

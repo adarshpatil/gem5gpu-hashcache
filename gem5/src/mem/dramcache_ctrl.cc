@@ -2108,9 +2108,13 @@ DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         if(dram_pkt->contextId == 31) {
              gpuQLat += cmd_at - dram_pkt->entryTime;
              bytesReadDRAMGPU += burstSize;
+             gpuMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+             gpuBusLat += tBURST;
         }
         else {
             cpuQLat += cmd_at - dram_pkt->entryTime;
+            cpuMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+            cpuBusLat += tBURST;
         }
     } else {
         ++writesThisTime;
