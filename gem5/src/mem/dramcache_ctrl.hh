@@ -273,6 +273,10 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_total_pred; // number of predictions made
 	Stats::Scalar dramCache_incorrect_pred; // number of miss predictions by predictor
 
+	Stats::Scalar dramCache_noncpu0_cpu_accesses;
+	Stats::Scalar dramCache_noncpu0_cpu_hits;
+	Stats::Formula dramCache_noncpu0_cpu_hit_rate;
+
 	Stats::Scalar dramCache_fillBursts; // stats for fill bursts
 	Stats::Average dramCache_avgFillQLen; // average fill Q length
 	Stats::Histogram fillsPerTurnAround;

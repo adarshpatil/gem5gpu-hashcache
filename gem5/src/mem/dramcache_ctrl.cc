@@ -138,6 +138,11 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				dramCache_max_gpu_lines = total_gpu_lines;
 		}
 	}
+	else if(pkt->req->contextId() != 0)
+	{
+		// not a gpu request and not a cpu0 request
+		dramCache_noncpu0_cpu_accesses++;
+	}
 
 	// check if the tag matches and line is valid
 	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)
@@ -166,6 +171,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				switched_to_cpu_line++;
 			}
 			dramCache_cpu_hits++;
+			if(pkt->req->contextId() != 0)
+				dramCache_noncpu0_cpu_hits++;
 		}
 
 		if (pkt->isRead ())
@@ -2185,7 +2192,7 @@ DRAMCacheCtrl::regStats ()
 		.desc ("Number of write backs caused by a read from dramcache");
 
 	dramCache_writes_to_dirty_lines
-		.name (name () + "dramCache_writes_to_dirty_lines")
+		.name (name () + ".dramCache_writes_to_dirty_lines")
 		.desc ("Number of writes to dirty lines in dramcache");
 
 	dramCache_gpu_replaced_cpu
@@ -2194,7 +2201,7 @@ DRAMCacheCtrl::regStats ()
 
 	dramCache_cpu_replaced_gpu
 		.name (name () + ".dramCache_cpu_replaced_gpu")
-		.desc ("Number of times cpu replaced gpu line ");
+		.desc ("Number of times cpu replaced gpu line");
 
 	switched_to_gpu_line
 		.name (name () + ".switched_to_gpu_line")
@@ -2244,6 +2251,20 @@ DRAMCacheCtrl::regStats ()
 		.name ( name() + ".dramCache_incorrect_pred")
 		.desc("Number of incorrect predictions");
 
+	dramCache_noncpu0_cpu_accesses
+		.name (name () + ".dramCache_noncpu0_cpu_accesses")
+		.desc ("Number of non cpu0 accesses");
+
+	dramCache_noncpu0_cpu_hits
+		.name (name() + ".dramCache_noncpu0_cpu_hits")
+		.desc("number of non cpu0 hits");
+
+	dramCache_noncpu0_cpu_hit_rate
+		.name (name() + ".dramCache_noncpu0_hit_rate")
+		.desc("hit rate of cpus for dramCache without cpu0")
+
+	dramCache_noncpu0_cpu_hit_rate = dramCache_noncpu0_cpu_hits / dramCache_noncpu0_cpu_accesses;
+
     dramCache_fillBursts
         .name(name() + ".dramCache_fillBursts")
         .desc("Number of DRAM Fill bursts");
@@ -2275,7 +2296,7 @@ DRAMCacheCtrl::regStats ()
 		.flags (nozero);
 
 	dramCache_max_gpu_occupancy
-		.name (name() + "")
+		.name (name() + ".dramCache_max_gpu_occupancy")
 		.desc("% max gpu occupancy in dramcache");
 
 	dramCache_max_gpu_occupancy = (dramCache_max_gpu_lines / dramCache_num_sets) * 100;
@@ -2296,7 +2317,7 @@ DRAMCacheCtrl::regStats ()
           / (dramCache_read_hits + dramCache_read_misses);
 
 	dramCache_wr_hit_rate
-		.name (name () + "dramCache_wr_hit_rate")
+		.name (name () + ".dramCache_wr_hit_rate")
 		.desc ("write hit rate of dramcache");
 
 	dramCache_wr_hit_rate = (dramCache_write_hits)
@@ -2311,14 +2332,14 @@ DRAMCacheCtrl::regStats ()
 					+ dramCache_write_misses);
 
 	dramCache_cpu_hit_rate
-		.name (name () + "dramCache_cpu_hit_rate")
+		.name (name () + ".dramCache_cpu_hit_rate")
 		.desc ("hit rate of dramcache for CPU");
 
 	dramCache_cpu_hit_rate = (dramCache_cpu_hits)
         / (dramCache_cpu_hits + dramCache_cpu_misses);
 
 	dramCache_gpu_hit_rate
-		.name (name () + "dramCache_gpu_hit_rate")
+		.name (name () + ".dramCache_gpu_hit_rate")
 		.desc ("hit rate of dramcache for GPU");
 
 	dramCache_gpu_hit_rate =
@@ -2328,7 +2349,7 @@ DRAMCacheCtrl::regStats ()
 					- dramCache_cpu_misses));
 
 	dramCache_correct_pred
-		.name ( name() + "dramCache_correct_pred")
+		.name ( name() + ".dramCache_correct_pred")
 		.desc ("Number of correct predictions");
 
 	dramCache_correct_pred = dramCache_total_pred - dramCache_incorrect_pred;
