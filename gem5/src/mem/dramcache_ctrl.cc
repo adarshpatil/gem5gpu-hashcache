@@ -2261,7 +2261,7 @@ DRAMCacheCtrl::regStats ()
 
 	dramCache_noncpu0_cpu_hit_rate
 		.name (name() + ".dramCache_noncpu0_hit_rate")
-		.desc("hit rate of cpus for dramCache without cpu0")
+		.desc("hit rate of cpus for dramCache without cpu0");
 
 	dramCache_noncpu0_cpu_hit_rate = dramCache_noncpu0_cpu_hits / dramCache_noncpu0_cpu_accesses;
 
