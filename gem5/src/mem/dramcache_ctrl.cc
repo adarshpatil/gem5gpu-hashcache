@@ -78,6 +78,11 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	randomPredictor.init(3594);
 
 	max_gpu_lines_sample_counter = 0;
+	inform("DRAMCache per controller capacity %d MB\n", deviceCapacity);
+	inform("DRAMCache scheduling policy %s\n", memSchedPolicy);
+	inform("DRAMCache readQLen %d writeQLen %d\n", readBufferSize, writeBufferSize);
+	inform("DRAMCache writeLowThreshold %d writeHighThreshold %d\n",
+			writeLowThreshold, writeHighThreshold);
 }
 
 void
@@ -2131,6 +2136,24 @@ DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         bytesWritten += burstSize;
         if (dram_pkt->contextId==31)
             bytesWrittenGPU += burstSize;
+        if (!dram_pkt->isFill)
+        {
+            // update latency stats for write requests
+            totWrMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+            totWrBusLat += tBURST;
+            totWrQLat += cmd_at - dram_pkt->entryTime;
+            if(dram_pkt->contextId == 31) {
+                 gpuWrQLat += cmd_at - dram_pkt->entryTime;
+                 gpuWrMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+                 gpuWrBusLat += tBURST;
+            }
+            else {
+                cpuWrQLat += cmd_at - dram_pkt->entryTime;
+                cpuWrMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+                cpuWrBusLat += tBURST;
+            }
+
+        }
         perBankWrBursts[dram_pkt->bankId]++;
     }
 }
@@ -2367,6 +2390,44 @@ DRAMCacheCtrl::regStats ()
 		.desc ("number of times access was blocked")
 		.subname (Blocked_NoMSHRs,"no_mshrs")
 		.subname (Blocked_NoTargets, "no_targets");
+
+    totWrQLat
+        .name(name() + ".totWrQLat")
+        .desc("Total ticks spent queuing for writes");
+
+    totWrBusLat
+        .name(name() + ".totWrBusLat")
+        .desc("Total ticks spent in databus transfers for writes");
+
+    totWrMemAccLat
+        .name(name() + ".totWrMemAccLat")
+        .desc("Total ticks spent from burst creation until serviced "
+              "by the DRAM for writes");
+
+    cpuWrQLat
+		.name(name() + ".cpuWrQLat")
+		.desc("ticks spent queuing for CPU Requests for writes");
+
+    cpuWrMemAccLat
+        .name(name() + ".cpuWrMemAccLat")
+        .desc("ticks spent from burst creation until serviced "
+              "by the DRAM for CPU Req for writes");
+
+    cpuWrBusLat
+        .name(name() + ".cpuWrBusLat")
+        .desc("ticks spent in databus transfers for CPU Requests for writes");
+
+    gpuWrQLat
+		.name(name() + ".gpuWrQLat")
+        .desc("Total ticks spent queuing for GPU Requests for writes");
+
+    gpuWrMemAccLat
+        .name(name() + ".gpuWrMemAccLat")
+        .desc("ticks spent from burst creation until serviced "
+              "by the DRAM for GPU Req for writes");
+    gpuWrBusLat
+        .name(name() + ".gpuWrBusLat")
+        .desc("ticks spent in databus transfers for GPU Requests for writes");
 }
 
 BaseMasterPort &

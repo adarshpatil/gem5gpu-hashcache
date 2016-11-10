@@ -766,6 +766,31 @@ DRAMCtrl::chooseNext(std::deque<DRAMPacket*>& queue, Tick extra_col_delay)
                 break;
             }
         }
+    } else if (memSchedPolicy == Enums::cpuPriorityfcfs) {
+        // check if there is a packet going to a free rank
+        DRAMPacket* selected_pkt = queue.front();
+        auto selected_pkt_loc = queue.begin();
+        for(auto i = queue.begin(); i != queue.end() ; ++i) {
+            DRAMPacket* dram_pkt = *i;
+            if (ranks[dram_pkt->rank]->isAvailable()) {
+                if (dram_pkt->contextId!=31) {
+                    // found a CPU packet whose rank is available
+                    selected_pkt = dram_pkt;
+                    selected_pkt_loc = i;
+                    found_packet = true;
+                    break;
+                }
+                if (!found_packet) {
+                    selected_pkt = dram_pkt;
+                    selected_pkt_loc = i;
+                    found_packet = true;
+                }
+            }
+        }
+        if(found_packet) {
+            queue.erase(selected_pkt_loc);
+            queue.push_front(selected_pkt);
+        }
     } else if (memSchedPolicy == Enums::frfcfs) {
         found_packet = reorderQueue(queue, extra_col_delay);
     } else

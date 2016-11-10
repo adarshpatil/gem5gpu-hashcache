@@ -47,7 +47,7 @@ from AbstractMemory import *
 
 # Enum for memory scheduling algorithms, currently First-Come
 # First-Served and a First-Row Hit then First-Come First-Served
-class MemSched(Enum): vals = ['fcfs', 'frfcfs']
+class MemSched(Enum): vals = ['fcfs', 'frfcfs', 'cpuPriorityfcfs'];
 
 # Enum for the address mapping. With Ch, Ra, Ba, Ro and Co denoting
 # channel, rank, bank, row and column, respectively, and going from

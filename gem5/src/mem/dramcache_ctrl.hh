@@ -297,6 +297,18 @@ class DRAMCacheCtrl : public DRAMCtrl
     /** The number of times this cache blocked for each blocked cause. */
     Stats::Vector blocked_causes;
 
+    // Latencies for write requests; DRAMCache doesn't reply immediately writes
+    // because we have to check tag for hit or miss
+    Stats::Scalar totWrQLat;
+    Stats::Scalar totWrMemAccLat;
+    Stats::Scalar totWrBusLat;
+    Stats::Scalar cpuWrQLat;
+    Stats::Scalar cpuWrMemAccLat;
+    Stats::Scalar cpuWrBusLat;
+    Stats::Scalar gpuWrQLat;
+    Stats::Scalar gpuWrMemAccLat;
+    Stats::Scalar gpuWrBusLat;
+
     DRAMCacheCtrl(const DRAMCacheCtrlParams* p);
 
     ~DRAMCacheCtrl() {
