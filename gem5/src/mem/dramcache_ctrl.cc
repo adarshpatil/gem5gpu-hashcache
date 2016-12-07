@@ -58,14 +58,13 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 
 	num_sub_blocks_per_way = dramCache_block_size / system_cache_block_size;
 
-	DPRINTF(DRAMCache,
-			"DRAMCache totalRows:%d columnsPerStripe:%d, channels:%d, "
+	inform( "DRAMCache totalRows:%d columnsPerStripe:%d, channels:%d, "
 			"banksPerRank:%d, ranksPerChannel:%d, columnsPerRowBuffer:%d, "
 			"rowsPerBank:%d, burstSize:%d\n",
 			totalRows, columnsPerStripe, channels, banksPerRank, ranksPerChannel,
 			columnsPerRowBuffer, rowsPerBank, burstSize);
 
-	DPRINTF(DRAMCache,"dramCacheTimingMode %d\n", dramCacheTimingMode);
+	inform("dramCacheTimingMode %d\n", dramCacheTimingMode);
 	// columsPerRowBuffer is actually rowBufferSize/burstSize => each column is 1 burst
 	// rowBufferSize = devicesPerRank * deviceRowBufferSize
 	//    for DRAM Cache devicesPerRank = 1 => rowBufferSize = deviceRowBufferSize = 2kB
@@ -83,6 +82,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	inform("DRAMCache readQLen %d writeQLen %d\n", readBufferSize, writeBufferSize);
 	inform("DRAMCache writeLowThreshold %d writeHighThreshold %d\n",
 			writeLowThreshold, writeHighThreshold);
+	inform("DRAMCache address mapping %d, page mgmt %d", addrMapping, pageMgmt);
 }
 
 void
@@ -366,37 +366,64 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 	// Addr addr = dramPktAddr / burstSize;
 	// DPRINTF(DRAMCache, "decode addr:%ld, dramPktAddr:%ld\n", addr, dramPktAddr);
 
-	// we have removed the lowest order address bits that denote the
-	// position within the column
-	// Using addrMapping == Enums::RoCoRaBaCh)
-	// optimise for closed page mode and utilise maximum
-	// parallelism of the DRAM (at the cost of power)
-
 	Addr addr = dramPktAddr;
 
-	// take out the lower-order column bits
-	addr = addr / columnsPerStripe; // div by 1
+	// we have removed the lowest order address bits that denote the
+	// position within the column
+	if(addrMapping == Enums::RoCoRaBaCh) {
+		// optimise for closed page mode and utilise maximum
+		// parallelism of the DRAM (at the cost of power)
 
-	// take out the channel part of the address, not that this has
-	// to match with how accesses are interleaved between the
-	// controllers in the address mapping
-	addr = addr / channels; // div by 1
+		// take out the lower-order column bits
+		addr = addr / columnsPerStripe; // div by 1
 
-	// start with the bank bits, as this provides the maximum
-	// opportunity for parallelism between requests
-	bank = addr % banksPerRank;
-	addr = addr / banksPerRank;
+		// take out the channel part of the address, not that this has
+		// to match with how accesses are interleaved between the
+		// controllers in the address mapping
+		addr = addr / channels; // div by 1
 
-	// next get the rank bits
-	rank = addr % ranksPerChannel;
-	addr = addr / ranksPerChannel;
+		// start with the bank bits, as this provides the maximum
+		// opportunity for parallelism between requests
+		bank = addr % banksPerRank;
+		addr = addr / banksPerRank;
 
-	// next, the higher-order column bites
-	addr = addr / (columnsPerRowBuffer / columnsPerStripe);
+		// next get the rank bits
+		rank = addr % ranksPerChannel;
+		addr = addr / ranksPerChannel;
 
-	// lastly, get the row bits
-	row = addr % rowsPerBank;
-	addr = addr / rowsPerBank;
+		// next, the higher-order column bites
+		addr = addr / (columnsPerRowBuffer / columnsPerStripe);
+
+		// lastly, get the row bits
+		row = addr % rowsPerBank;
+		addr = addr / rowsPerBank;
+
+	} else if (addrMapping == Enums::RoRaBaCoCh) {
+        // take out the lower-order column bits
+        addr = addr / columnsPerStripe;
+
+        // take out the channel part of the address
+        addr = addr / channels;
+
+        // next, the higher-order column bites
+        addr = addr / (columnsPerRowBuffer / columnsPerStripe);
+
+		// after the column bits, we get the bank bits to interleave
+		// over the banks
+		bank = addr % banksPerRank;
+		addr = addr / banksPerRank;
+
+		// after the bank, we get the rank bits which thus interleaves
+		// over the ranks
+		rank = addr % ranksPerChannel;
+		addr = addr / ranksPerChannel;
+
+		// lastly, get the row bits
+		row = addr % rowsPerBank;
+		addr = addr / rowsPerBank;
+    }
+
+	assert(pkt->req->hasContextId());
 
 	assert(rank < ranksPerChannel);
 	assert(bank < banksPerRank);
@@ -405,8 +432,6 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 
 	DPRINTF(DRAMCache, "Address: %lld Rank %d Bank %d Row %d\n", dramPktAddr,
 			rank, bank, row);
-
-	assert(pkt->req->hasContextId());
 	// create the corresponding DRAM packet with the entry time and
 	// ready time set to the current tick, the latter will be updated
 	// later
@@ -2061,7 +2086,8 @@ DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
             got_bank_conflict |= same_rank_bank && !same_row;
             ++p;
         }
-
+        DPRINTF(DRAMCache,"got_more_hits %d got_bank_conflict %d\n",
+                got_more_hits, got_bank_conflict);
         // auto pre-charge when either
         // 1) open_adaptive policy, we have not got any more hits, and
         //    have a bank conflict
