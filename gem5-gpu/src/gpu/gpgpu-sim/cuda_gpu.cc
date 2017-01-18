@@ -55,6 +55,7 @@
 using namespace std;
 
 vector<CudaGPU*> CudaGPU::gpuArray;
+bool CudaGPU::running;
 
 // From GPU syscalls
 void registerFatBinaryTop(GPUSyscallHelper *helper, Addr sim_fatCubin, size_t sim_binSize);

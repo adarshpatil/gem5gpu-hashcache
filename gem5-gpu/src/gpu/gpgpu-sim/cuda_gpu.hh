@@ -157,6 +157,10 @@ class CudaGPU : public ClockedObject
     static std::vector<CudaGPU*> gpuArray;
 
   public:
+    /// If true there is a kernel currently executing
+    /// NOTE: Jason doesn't think we need this
+    static bool running;
+
     /**
      *  Only to be used in GPU system calls (gpu_syscalls) as a way to access
      *  the CUDA-enabled GPUs.
@@ -290,9 +294,6 @@ class CudaGPU : public ClockedObject
     Tick launchDelay;
     Tick returnDelay;
 
-    /// If true there is a kernel currently executing
-    /// NOTE: Jason doesn't think we need this
-    bool running;
 
     /// True if the running thread is currently blocked and needs to be activated
     bool unblockNeeded;

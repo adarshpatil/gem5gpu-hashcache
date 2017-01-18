@@ -6,6 +6,7 @@
  */
 
 #include "mem/dramcache_ctrl.hh"
+#include "src/gpu/gpgpu-sim/cuda_gpu.hh"
 #include "debug/DRAMCache.hh"
 #include "debug/Drain.hh"
 #include "mem/ruby/system/RubyPort.hh"
@@ -16,9 +17,16 @@
 using namespace std;
 using namespace Data;
 
+// these things are #defined in gpgpu-sim; since we include cuda_gpu for
+// CudaGPU::running flag, we need to undef these
+// #define WRITE 'W' -> gpgpu-sim/dram.h:39:15
+// #define READ 'R'  -> gpgpu-sim/dram.h:39:14
+#undef WRITE
+#undef READ
 
 map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
 int DRAMCacheCtrl::predAccuracy;
+bool DRAMCacheCtrl::switched_gpu_running;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
@@ -58,14 +66,14 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 
 	num_sub_blocks_per_way = dramCache_block_size / system_cache_block_size;
 
-	DPRINTF(DRAMCache,
-			"DRAMCache totalRows:%d columnsPerStripe:%d, channels:%d, "
+	inform(	"DRAMCache totalRows:%d columnsPerStripe:%d, channels:%d, "
 			"banksPerRank:%d, ranksPerChannel:%d, columnsPerRowBuffer:%d, "
-			"rowsPerBank:%d, burstSize:%d\n",
+			"rowsPerBank:%d, burstSize:%d, deviceSize %d, deviceCapacity %d\n",
 			totalRows, columnsPerStripe, channels, banksPerRank, ranksPerChannel,
-			columnsPerRowBuffer, rowsPerBank, burstSize);
+			columnsPerRowBuffer, rowsPerBank, burstSize, deviceSize, deviceCapacity);
 
-	DPRINTF(DRAMCache,"dramCacheTimingMode %d\n", dramCacheTimingMode);
+	inform("dramCacheTimingMode %d\n", dramCacheTimingMode);
+	inform("RUNNING IN CPU BYPASS DRAMCACHE MODE\n");
 	// columsPerRowBuffer is actually rowBufferSize/burstSize => each column is 1 burst
 	// rowBufferSize = devicesPerRank * deviceRowBufferSize
 	//    for DRAM Cache devicesPerRank = 1 => rowBufferSize = deviceRowBufferSize = 2kB
@@ -76,6 +84,8 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 
 	// we initalize a static seed for our randomPredictor
 	randomPredictor.init(3594);
+
+	switched_gpu_running = false;
 
 	max_gpu_lines_sample_counter = 0;
 	inform("DRAMCache per controller capacity %d MB\n", deviceCapacity);
@@ -1597,9 +1607,32 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// UPDATE we modified this to 2 bursts including tag since we assume the
 	// tags also burst out using an odd burst size of slightly greater than 64B
 
+	// if GPU state changed
+	if(switched_gpu_running != CudaGPU::running)
+	{
+		// cleanAllLines only when GPU starts running
+		if(CudaGPU::running)
+		{
+			DPRINTF(DRAMCache,"GPU started running\n");
+			cleanAllLines();
+		}
+		// do nothing when GPU stops running
+	}
+
+	// track GPU running state to invalidate the cache when GPU running changes
+	switched_gpu_running = CudaGPU::running;
+
 	// check local buffers and do not accept if full
 	if (pkt->isRead ())
 	{
+		// CPU request and GPU is running then bypass
+		if (pkt->req->contextId() != 31 && CudaGPU::running &&
+				canRdBypass(blockAlign(pkt->getAddr())) )
+		{
+			allocateMissBuffer(pkt, 1, true);
+			return true;
+		}
+
 		assert(size != 0);
 		if (readQueueFull (DRAM_PKT_COUNT))
 		{
@@ -1618,10 +1651,29 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 			else
 				cpuReadReqs++;
 			bytesReadSys += size;
+
+			// to measure footprint
+			if (pkt->req->contextId() == 31) {
+				auto retInsert = gpuUniqueLines.insert(blockAlign(pkt->getAddr()));
+				if (retInsert.second == true)
+					gpuFootprint += 128;
+			}
+			else {
+				auto retInsert = cpuUniqueLines.insert(blockAlign(pkt->getAddr()));
+				if (retInsert.second == true)
+					cpuFootprint += 128;
+			}
 		}
 	}
 	else if (pkt->isWrite ())
 	{
+		// if CPU request and GPU is running bypass
+		if (pkt->req->contextId() != 31 && CudaGPU::running)
+		{
+			wrBypass(pkt);
+			return true;
+		}
+
 		assert(size != 0);
 		if (writeQueueFull (DRAM_PKT_COUNT))
 		{
@@ -1640,6 +1692,18 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 			else
 				cpuWriteReqs++;
 			bytesWrittenSys += size;
+
+			// to measure footprint
+			if (pkt->req->contextId() == 31) {
+				auto retInsert = gpuUniqueLines.insert(blockAlign(pkt->getAddr()));
+				if (retInsert.second == true)
+					gpuFootprint += 128;
+			}
+			else {
+				auto retInsert = cpuUniqueLines.insert(blockAlign(pkt->getAddr()));
+				if (retInsert.second == true)
+					cpuFootprint += 128;
+			}
 		}
 	}
 	else
@@ -1812,13 +1876,35 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 	{
 		assert(mshr->getNumTargets()>=1);
 		MSHR::Target *initial_tgt = mshr->getTarget ();
+
+		// fillRequired is true during normal execution
+		bool fillRequired = true;
+
+		// if GPU is running and response was for a CPU packet
+		// check if the MSHR has a target from GPU
+		// if MSHR has a target from GPU only then we perform fill, else bypass
+		if(CudaGPU::running && (pkt->req->contextId()!=31))
+		{
+			DPRINTF(DRAMCache,"Bypass packet recv for add %d", pkt->getAddr());
+			fillRequired = false;
+			MSHR::TargetList tl = mshr->getTargetList();
+			for (auto it=tl.begin(); it != tl.end(); ++it)
+			{
+				if(it->pkt->req->contextId() == 31)
+				{
+					fillRequired = true;
+					break;
+				}
+			}
+		}
+
 		// find the cache block, set id and tag
 		// fix the tag entry now that memory access has returned
 		unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
 		unsigned int cacheSet = cacheBlock % dramCache_num_sets;
 		unsigned int cacheTag = cacheBlock / dramCache_num_sets;
 
-		if (!set[cacheSet].valid)
+		if (!set[cacheSet].valid && fillRequired)
 		{
 			// cold miss - the set was not valid
 			set[cacheSet].tag = cacheTag;
@@ -1837,12 +1923,12 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
 			delete clone_pkt;
 		}
-		else if (set[cacheSet].tag == cacheTag)
+		else if (set[cacheSet].tag == cacheTag && fillRequired)
 		{
 			// predictor could have possibly sent out a PAM request incorrectly
 			// discard this and do nothing to tag directory (doesn't reach here)
 		}
-		else if (set[cacheSet].tag != cacheTag)
+		else if (set[cacheSet].tag != cacheTag && fillRequired)
 		{
 			Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
 			DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d dirty %d\n",
@@ -2428,6 +2514,14 @@ DRAMCacheCtrl::regStats ()
     gpuWrBusLat
         .name(name() + ".gpuWrBusLat")
         .desc("ticks spent in databus transfers for GPU Requests for writes");
+
+    cpuFootprint
+        .name(name() + ".cpuFootprint")
+        .desc("CPU footprint in terms of number unique cache lines");
+
+    gpuFootprint
+        .name(name() + ".gpuFootprint")
+        .desc("GPU footprint in terms of number of unique cache lines");
 }
 
 BaseMasterPort &
@@ -2631,6 +2725,56 @@ DRAMCacheCtrl::predict_static(Addr blk_addr)
 	return pred;
 }
 
+bool
+DRAMCacheCtrl::canRdBypass(Addr blk_addr)
+{
+	DPRINTF(DRAMCache,"Read Bypass check for address %d\n", blk_addr);
+	unsigned int cacheBlock = blk_addr / dramCache_block_size;
+	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+
+	// if hit and dirty we cannot bypass - return false
+	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid && set[cacheSet].dirty)
+		return false;
+
+	// if miss or (clean and hit)
+	return true;
+}
+
+void
+DRAMCacheCtrl::wrBypass(PacketPtr pkt)
+{
+	DPRINTF(DRAMCache,"Write Bypass for address %d\n", pkt->getAddr());
+	Addr blk_addr = blockAlign(pkt->getAddr());
+	unsigned int cacheBlock = blk_addr / dramCache_block_size;
+	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+
+	// if hit - invalidate line
+	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)
+	{
+		set[cacheSet].dirty = false;
+		set[cacheSet].tag = 0;
+		set[cacheSet].valid = false;
+	}
+
+	// access and respond
+	access(pkt);
+	RequestPtr req = new Request(pkt->getAddr(),
+			dramCache_block_size, 0, Request::wbMasterId);
+	req->setContextId(pkt->req->contextId());
+	PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
+	clone_pkt->allocate();
+	memcpy(clone_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
+					dramCache_block_size);
+	// bypass for both hit and miss - allocWB
+	allocateWriteBuffer(clone_pkt,1);
+
+	DPRINTF(DRAMCache,"Bypass Response to address %d\n", pkt->getAddr());
+	respond(pkt, frontendLatency);
+
+}
+
 void
 DRAMCacheCtrl::decMac(ContextID contextId, Addr pc)
 {
@@ -2649,6 +2793,15 @@ Addr
 DRAMCacheCtrl::regenerateBlkAddr(uint64_t set, uint64_t tag)
 {
 	return ((tag * dramCache_num_sets) + set) * dramCache_block_size;
+}
+
+void
+DRAMCacheCtrl::cleanAllLines ()
+{
+	for (int i = 0; i < dramCache_num_sets; i++)
+	{
+		set[i].dirty = false;
+	}
 }
 
 void
