@@ -347,7 +347,7 @@ DRAMCacheCtrl::doWriteBack(Addr evictAddr, int contextId)
 			dramCache_block_size);
 	delete dummyRdPkt;
 
-	allocateWriteBuffer(wbPkt,1);
+	allocateWriteBuffer(wbPkt,curTick()+1);
 
 }
 
@@ -786,7 +786,7 @@ DRAMCacheCtrl::processWriteRespondEvent()
 					pkt->allocate();
 					memcpy(pkt->getPtr<uint8_t>(), dram_pkt->pkt->getPtr<uint8_t>(),
 							dramCache_block_size);
-					allocateWriteBuffer(pkt,1);
+					allocateWriteBuffer(pkt,curTick()+1);
 				}
 			}
 
@@ -1078,7 +1078,7 @@ DRAMCacheCtrl::processRespondEvent ()
 				else
 				{
 					// mshr not found allocate new MSHR
-					allocateMissBuffer (dram_pkt->pkt, 1, true);
+					allocateMissBuffer (dram_pkt->pkt, curTick()+1, true);
 				}
 			}
 			else
@@ -1282,7 +1282,8 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 #ifdef PASS_PC
 		if (predict(RubyPort::pcTable[cid][blk_addr], cid) == false)
 #else
-		if (predict_static(blk_addr) == false)
+		// do PAM only if GPU is not running
+		if (!CudaGPU::running && predict_static(blk_addr) == false )
 #endif
 		{
 			DPRINTF(DRAMCache,"sending PAM request for addr %d contextId %d\n",
@@ -1302,7 +1303,7 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 			pamQueue[blk_addr]->pkt = pkt;
 			PacketPtr clone_pkt = new Packet (pkt, false, true);
 			pamQueue[blk_addr]->mshr =
-					allocateMissBuffer(clone_pkt, PREDICTION_LATENCY, true);
+					allocateMissBuffer(clone_pkt, curTick()+PREDICTION_LATENCY, true);
 		}
 	}
 #endif
@@ -1629,7 +1630,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		if (pkt->req->contextId() != 31 && CudaGPU::running &&
 				canRdBypass(blockAlign(pkt->getAddr())) )
 		{
-			allocateMissBuffer(pkt, 1, true);
+			allocateMissBuffer(pkt, curTick()+1, true);
 			return true;
 		}
 
@@ -2768,7 +2769,7 @@ DRAMCacheCtrl::wrBypass(PacketPtr pkt)
 	memcpy(clone_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
 					dramCache_block_size);
 	// bypass for both hit and miss - allocWB
-	allocateWriteBuffer(clone_pkt,1);
+	allocateWriteBuffer(clone_pkt,curTick()+1);
 
 	DPRINTF(DRAMCache,"Bypass Response to address %d\n", pkt->getAddr());
 	respond(pkt, frontendLatency);
