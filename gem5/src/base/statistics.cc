@@ -43,6 +43,7 @@
 #include "base/str.hh"
 #include "base/time.hh"
 #include "base/trace.hh"
+#include "base/stats/text.hh"
 
 using namespace std;
 
@@ -517,6 +518,43 @@ dump()
         dumpHandler();
     else
         fatal("No registered Stats::dump handler");
+}
+
+void statsDumpGPUKernel(std::ostream& fileptr)
+{
+    fileptr << "\n--------- Kernel End Simulation Statistics ----------\n";
+
+    Stats::processDumpQueue();
+
+    std::list<Stats::Info *> stats = Stats::statsList();
+
+    /* gather_stats -> prepare */
+    for (auto i = stats.begin(); i != stats.end(); ++i)
+        (*i)->prepare();
+
+    /* gather_stats -> convert_value */
+    for (auto i = stats.begin(); i != stats.end(); ++i) {
+        Stats::Info *stat = *i;
+
+        Text t(fileptr);
+
+        Stats::ScalarInfo *scalar = dynamic_cast<Stats::ScalarInfo *>(stat);
+        Stats::VectorInfo *vector = dynamic_cast<Stats::VectorInfo *>(stat);
+        Stats::DistInfo *dist = dynamic_cast<Stats::DistInfo *>(stat);
+        Stats::Vector2dInfo *vector2d = dynamic_cast<Stats::Vector2dInfo *>(stat);
+
+        if (scalar) {
+            t.visit((*scalar));
+        } else if (vector) {
+            t.visit((*vector));
+        } else if (dist) {
+            t.visit((*dist));
+        } else if (vector2d) {
+            t.visit((*vector2d));
+        } else {
+            fileptr << "?????? " << stat->name << '\n';
+        }
+    }
 }
 
 void
