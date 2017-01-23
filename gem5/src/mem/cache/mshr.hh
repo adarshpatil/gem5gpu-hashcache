@@ -264,6 +264,12 @@ class MSHR : public Packet::SenderState, public Printable
         return &targets.front();
     }
 
+    TargetList getTargetList()
+    {
+        assert(hasTargets());
+        return targets;
+    }
+
     /**
      * Pop first target.
      */

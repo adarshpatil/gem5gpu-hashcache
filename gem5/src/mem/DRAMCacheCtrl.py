@@ -201,15 +201,15 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     # write_buffer_size = 8
     # read_buffer_size = 8
     # ADARSH Since we double both num of layers and size of each layer, we x4 buffer sizes
-    write_buffer_size = 64
-    read_buffer_size = 128
+    write_buffer_size = 32
+    read_buffer_size = 32
     addr_mapping = 'RoCoRaBaCh'
     min_writes_per_switch = 8
 
     # ADARSH FCFS policy for closed page in cache
-    mem_sched_policy = 'cpuPriorityfcfs'
+    mem_sched_policy = 'fcfs'
 
-    mshrs = 128
+    mshrs = 64
     tgts_per_mshr = 16
 
     # for dramcache this write theshold is (cache writes + cache fills)

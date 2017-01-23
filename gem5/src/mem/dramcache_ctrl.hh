@@ -309,6 +309,8 @@ class DRAMCacheCtrl : public DRAMCtrl
     Stats::Scalar gpuWrMemAccLat;
     Stats::Scalar gpuWrBusLat;
 
+    static bool switched_gpu_running;
+
     DRAMCacheCtrl(const DRAMCacheCtrlParams* p);
 
     ~DRAMCacheCtrl() {
@@ -499,10 +501,16 @@ class DRAMCacheCtrl : public DRAMCtrl
     bool predict(ContextID contextId, Addr pc); // true for hit; false for miss
     // takes static prediction accuracy & predicts true for hit; false for miss
     bool predict_static(Addr blk_addr);
+
+    bool canRdBypass(Addr blk_addr);
+    void wrBypass(PacketPtr pkt);
+
     void incMac(ContextID contextId, Addr pc);
     void decMac(ContextID contextId, Addr pc);
 
     Addr regenerateBlkAddr(uint64_t set, uint64_t tag);
+
+    void cleanAllLines();
 
     void access(PacketPtr ptr);
     void respond(PacketPtr ptr, Tick latency);
