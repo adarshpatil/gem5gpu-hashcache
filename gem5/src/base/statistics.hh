@@ -3211,6 +3211,7 @@ sum(Temp val)
 
 /** Dump all statistics data to the registered outputs */
 void dump();
+void statsDumpGPUKernel(std::ostream& fileptr);
 void reset();
 void enable();
 bool enabled();
