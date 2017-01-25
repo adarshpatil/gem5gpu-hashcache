@@ -131,7 +131,7 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     # size of device
     # two banks per device with each bank 4MB [2]
     # ADARSH changed to 4 banks per device with each bank 4MB 
-    device_size = '16MB'
+    device_size = '4MB'
     
     # 1x32 configuration, 1 device with 32 TSVs [2]
     # device_bus_width = 32
@@ -207,7 +207,7 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     min_writes_per_switch = 8
 
     # ADARSH FCFS policy for closed page in cache
-    mem_sched_policy = 'fcfs'
+    mem_sched_policy = 'frfcfs'
 
     mshrs = 128
     tgts_per_mshr = 16

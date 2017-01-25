@@ -337,7 +337,7 @@ DRAMCacheCtrl::doWriteBack(Addr evictAddr, int contextId)
 			dramCache_block_size);
 	delete dummyRdPkt;
 
-	allocateWriteBuffer(wbPkt,1);
+	allocateWriteBuffer(wbPkt,curTick()+1);
 
 }
 
@@ -801,7 +801,7 @@ DRAMCacheCtrl::processWriteRespondEvent()
 					pkt->allocate();
 					memcpy(pkt->getPtr<uint8_t>(), dram_pkt->pkt->getPtr<uint8_t>(),
 							dramCache_block_size);
-					allocateWriteBuffer(pkt,1);
+					allocateWriteBuffer(pkt,curTick()+1);
 				}
 			}
 
@@ -1093,7 +1093,7 @@ DRAMCacheCtrl::processRespondEvent ()
 				else
 				{
 					// mshr not found allocate new MSHR
-					allocateMissBuffer (dram_pkt->pkt, 1, true);
+					allocateMissBuffer (dram_pkt->pkt, curTick()+1, true);
 				}
 			}
 			else
@@ -1317,7 +1317,7 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 			pamQueue[blk_addr]->pkt = pkt;
 			PacketPtr clone_pkt = new Packet (pkt, false, true);
 			pamQueue[blk_addr]->mshr =
-					allocateMissBuffer(clone_pkt, PREDICTION_LATENCY, true);
+					allocateMissBuffer(clone_pkt, curTick()+PREDICTION_LATENCY, true);
 		}
 	}
 #endif

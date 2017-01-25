@@ -320,7 +320,7 @@ for benchmark in run_mix:
             take_cpt_insts = take_cpt_cpu_insts_8c[int(benchmark[2:])-1]
 
     if args.dramcache and (int(args.memory) == 8):
-        suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-256ML3'
+        suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-64ML3'
     elif args.dramcache and (int(args.memory) == 16):
         suite_results_dir = results_dir + '/' + benchmark[0] + 'core-16G-512ML3'
     else:

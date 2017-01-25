@@ -55,6 +55,7 @@
 using namespace std;
 
 vector<CudaGPU*> CudaGPU::gpuArray;
+bool CudaGPU::running;
 
 // From GPU syscalls
 void registerFatBinaryTop(GPUSyscallHelper *helper, Addr sim_fatCubin, size_t sim_binSize);
@@ -348,10 +349,10 @@ void CudaGPU::beginRunning(Tick stream_queued_time, struct CUstream_st *_stream)
 
     DPRINTF(CudaGPU, "Beginning kernel execution at %llu\n", curTick());
     kernelTimes.push_back(curTick());
-    if (dumpKernelStats) {
-        Stats::dump();
-        Stats::reset();
-    }
+    //if (dumpKernelStats) {
+        //Stats::dump();
+        //Stats::reset();
+    //}
     numKernelsStarted++;
     if (running) {
         panic("Should not already be running if we are starting\n");
@@ -385,8 +386,15 @@ void CudaGPU::processFinishKernelEvent(int grid_id)
 
     kernelTimes.push_back(curTick());
     if (dumpKernelStats) {
-        Stats::dump();
-        Stats::reset();
+        std::ostream *os = simout.find("kernel_stat.txt");
+        if (!os) {
+            os = simout.create("kernel_stat.txt");
+        }
+        Stats::statsDumpGPUKernel(*os);
+
+        // ADARSH call replaced to allow dumpStats in another file
+        //Stats::dump();
+        //Stats::reset();
     }
 
     if (unblockNeeded && streamManager->empty()) {
