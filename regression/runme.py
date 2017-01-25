@@ -229,6 +229,7 @@ run_common_config = '''--checkpoint-restore=1
 --l2_assoc=8
 --mem-type=DDR3_1600_x64
 --dir-on
+--kernel_stats
 --benchmark_stdout benchstdout
 --benchmark_stderr benchstderr
 --gpuapp_in_workload'''
@@ -320,7 +321,7 @@ for benchmark in run_mix:
             take_cpt_insts = take_cpt_cpu_insts_8c[int(benchmark[2:])-1]
 
     if args.dramcache and (int(args.memory) == 8):
-        suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-256ML3'
+        suite_results_dir = results_dir + '/' + benchmark[0] +'core-8G-64ML3-cpubypass'
     elif args.dramcache and (int(args.memory) == 16):
         suite_results_dir = results_dir + '/' + benchmark[0] + 'core-16G-512ML3'
     else:
