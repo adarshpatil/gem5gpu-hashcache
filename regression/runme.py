@@ -98,6 +98,7 @@ benchmarks = {
         '4g28': 'needle;cactusADM;soplex;bwaves;libquantum',
         '4g29': 'needle;astar;soplex;cactusADM;gcc',
         '4g30': 'heartwall;soplex;cactusADM;sphinx3;libquantum',
+        '4g32': 'hotspot;gcc;gobmk;leslie3d;sphinx3',
 
         # 8core
         '8g1' : 'hotspot;milc;mcf;bzip2;gcc;gobmk;libquantum;hmmer;sphinx3',
@@ -138,6 +139,7 @@ benchmarks = {
         '4c28': 'cactusADM;soplex;bwaves;libquantum',
         '4c29': 'astar;soplex;cactusADM;gcc',
         '4c30': 'soplex;cactusADM;sphinx3;libquantum',
+        '4c32': 'gcc;gobmk;leslie3d;sphinx3',
 
         # 8core only CPU
         '8c1' : 'milc;mcf;bzip2;gcc;gobmk;libquantum;hmmer;sphinx3',
