@@ -203,7 +203,7 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     # ADARSH Since we double both num of layers and size of each layer, we x4 buffer sizes
     write_buffer_size = 32
     read_buffer_size = 32
-    addr_mapping = 'RoCoRaBaCh'
+    addr_mapping = 'RoRaBaCoCh'
     min_writes_per_switch = 8
 
     # ADARSH FCFS policy for closed page in cache
