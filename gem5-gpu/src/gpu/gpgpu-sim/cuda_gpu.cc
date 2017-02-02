@@ -385,7 +385,7 @@ void CudaGPU::processFinishKernelEvent(int grid_id)
     streamManager->register_finished_kernel(grid_id);
 
     kernelTimes.push_back(curTick());
-    if (dumpKernelStats) {
+    if (dumpKernelStats && numKernelsCompleted.value()<400) {
         std::ostream *os = simout.find("kernel_stat.txt");
         if (!os) {
             os = simout.create("kernel_stat.txt");
