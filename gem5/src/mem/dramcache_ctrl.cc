@@ -238,6 +238,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				}
 				if (isGPUOwned[cacheSet]) //set occupied by GPU line
 				{
+					dramCache_gpu_replaced_gpu++;
 					// gpu req replacing gpu line
 					if (set[cacheSet].dirty)  // GPU dirty line will be evicted
 						total_gpu_dirty_lines--;
@@ -1302,6 +1303,7 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 		{
 			DPRINTF(DRAMCache,"sending PAM request for addr %d contextId %d\n",
 					pkt->getAddr(), pkt->req->contextId());
+			dramCache_pam_requests++;
 			// predicted as miss do PAM
 			// allocate in PAMQueue
 			// create an entry in MSHR, which will send a request to memory
@@ -1730,6 +1732,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		// found in PAM Queue
 		if (pr->isHit == -1)
 		{
+			dramCache_pam_returned_before_access++;
 			// DRAMCache hasn't done access so we dont know hit or miss
 			// we put the data returned from this packet, that came from DRAM
 			// into the first target of the MSHR for use incase of a miss
@@ -2252,6 +2255,10 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_cpu_replaced_gpu")
 		.desc ("Number of times cpu replaced gpu line");
 
+	dramCache_gpu_replaced_gpu
+	    .name (name () + ".dramCache_gpu_replaced_gpu")
+	    .desc ("Number of times gpu replaced gpu line");
+
 	switched_to_gpu_line
 		.name (name () + ".switched_to_gpu_line")
 		.desc ("Number of times CPU line became GPU line in cache ");
@@ -2299,6 +2306,14 @@ DRAMCacheCtrl::regStats ()
 	dramCache_incorrect_pred
 		.name ( name() + ".dramCache_incorrect_pred")
 		.desc("Number of incorrect predictions");
+
+	dramCache_pam_requests
+	    .name ( name() + ".dramCache_pam_requests")
+	    .desc("Number of pam requests sent");
+
+	dramCache_pam_returned_before_access
+	    .name ( name() + ".dramCache_pam_returned_before_access")
+	    .desc("times pam returned before access in cache completed");
 
 	dramCache_noncpu0_cpu_accesses
 		.name (name () + ".dramCache_noncpu0_cpu_accesses")

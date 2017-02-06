@@ -254,6 +254,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_writes_to_dirty_lines;
 	Stats::Scalar dramCache_gpu_replaced_cpu;
 	Stats::Scalar dramCache_cpu_replaced_gpu;
+	Stats::Scalar dramCache_gpu_replaced_gpu;
 	Stats::Scalar switched_to_gpu_line; // CPU lines that became GPU lines in cache
 	Stats::Scalar switched_to_cpu_line; // GPU lines that became CPU lines in cache
 	Stats::Scalar dramCache_cpu_hits;   // hits for CPU req
@@ -272,6 +273,9 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Vector dramCache_mshr_miss_latency; // Total cycle latency of MSHR [0]-cpu [1]-gpu
 	Stats::Scalar dramCache_total_pred; // number of predictions made
 	Stats::Scalar dramCache_incorrect_pred; // number of miss predictions by predictor
+
+	Stats::Scalar dramCache_pam_requests; // number of times pam request sent
+	Stats::Scalar dramCache_pam_returned_before_access;
 
 	Stats::Scalar dramCache_noncpu0_cpu_accesses;
 	Stats::Scalar dramCache_noncpu0_cpu_hits;
