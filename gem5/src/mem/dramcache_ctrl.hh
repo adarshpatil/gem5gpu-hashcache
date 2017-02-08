@@ -54,7 +54,7 @@ class DRAMCacheCtrl : public DRAMCtrl
      */
     enum BlockedCause {
         Blocked_NoMSHRs,
-		Blocked_NoWBBuffers = MSHRQueue_WriteBuffer,
+		Blocked_NoWBuffers = MSHRQueue_WriteBuffer,
         Blocked_NoTargets,
         NUM_BLOCKED_CAUSES
     };
@@ -254,24 +254,38 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_writes_to_dirty_lines;
 	Stats::Scalar dramCache_gpu_replaced_cpu;
 	Stats::Scalar dramCache_cpu_replaced_gpu;
+	Stats::Scalar dramCache_gpu_replaced_gpu;
 	Stats::Scalar switched_to_gpu_line; // CPU lines that became GPU lines in cache
 	Stats::Scalar switched_to_cpu_line; // GPU lines that became CPU lines in cache
 	Stats::Scalar dramCache_cpu_hits;   // hits for CPU req
 	Stats::Scalar dramCache_cpu_misses; // misses for CPU req
 	// histogram grouping of set numbers (1000 buckets) and number of times sets were occupied by GPU
 	Stats::Histogram dramCache_gpu_occupancy_per_set;
+
 	Stats::Scalar dramCache_mshr_hits;
 	Stats::Scalar dramCache_cpu_mshr_hits;
 	Stats::Scalar dramCache_writebuffer_hits;
 	Stats::Scalar dramCache_cpu_writebuffer_hits;
+    Stats::Scalar dramCache_tot_mshr_used;
+    Stats::Scalar dramCache_tot_writebuffer_used;
+    Stats::Scalar dramCache_max_mshr_used;
+    Stats::Scalar dramCache_max_writebuffer_used;
+
 	Stats::Scalar dramCache_max_gpu_dirty_lines; // we need to find the size of dirty line structure
 	// max number of gpu sets in dramcache
 	// - chaining kicks in only in cpu lines are lesser than low thresh
 	// - meaning gpu should be hungry and occupy a lots of lines in the cache
 	Stats::Scalar dramCache_max_gpu_lines;
+
 	Stats::Vector dramCache_mshr_miss_latency; // Total cycle latency of MSHR [0]-cpu [1]-gpu
 	Stats::Scalar dramCache_total_pred; // number of predictions made
 	Stats::Scalar dramCache_incorrect_pred; // number of miss predictions by predictor
+
+	Stats::Scalar dramCache_pam_requests; // number of times pam request sent
+	Stats::Scalar dramCache_pam_returned_before_access;
+
+	Stats::Scalar dramCache_rd_gpubypasses;
+	Stats::Scalar dramCache_wr_gpubypasses;
 
 	Stats::Scalar dramCache_noncpu0_cpu_accesses;
 	Stats::Scalar dramCache_noncpu0_cpu_hits;
@@ -426,6 +440,10 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     MSHR *allocateMissBuffer(PacketPtr pkt, Tick time, bool sched_send = true)
     {
+        dramCache_tot_mshr_used++;
+        if((mshrQueue.allocated+1)>dramCache_max_mshr_used.value())
+            dramCache_max_mshr_used = mshrQueue.allocated+1;
+
         DPRINTF(DRAMCache,"Allocating MSHR for blkaddr %d size %d\n",
                 blockAlign(pkt->getAddr()), dramCache_block_size);
         return allocateBufferInternal(&mshrQueue,
@@ -435,6 +453,10 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     MSHR *allocateWriteBuffer(PacketPtr pkt, Tick time)
     {
+        dramCache_tot_writebuffer_used++;
+        if((writeBuffer.allocated+1)>dramCache_max_writebuffer_used.value())
+            dramCache_max_writebuffer_used = writeBuffer.allocated+1;
+
         DPRINTF(DRAMCache,"Allocating write buffer for blkaddr %d size %d\n",
                 blockAlign(pkt->getAddr()), dramCache_block_size);
         assert(pkt->isWrite() && !pkt->isRead());
