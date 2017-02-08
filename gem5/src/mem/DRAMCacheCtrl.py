@@ -209,7 +209,8 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     # ADARSH FCFS policy for closed page in cache
     mem_sched_policy = 'frfcfs'
 
-    mshrs = 64
+    mshrs = 128
+    write_buffers = 128
     tgts_per_mshr = 16
 
     # for dramcache this write theshold is (cache writes + cache fills)

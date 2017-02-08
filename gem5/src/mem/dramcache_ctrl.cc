@@ -249,6 +249,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				}
 				if (isGPUOwned[cacheSet]) //set occupied by GPU line
 				{
+					dramCache_gpu_replaced_gpu++;
 					// gpu req replacing gpu line
 					if (set[cacheSet].dirty)  // GPU dirty line will be evicted
 						total_gpu_dirty_lines--;
@@ -1314,6 +1315,7 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 		{
 			DPRINTF(DRAMCache,"sending PAM request for addr %d contextId %d\n",
 					pkt->getAddr(), pkt->req->contextId());
+			dramCache_pam_requests++;
 			// predicted as miss do PAM
 			// allocate in PAMQueue
 			// create an entry in MSHR, which will send a request to memory
@@ -1656,6 +1658,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		if (pkt->req->contextId() != 31 && CudaGPU::running &&
 				canRdBypass(blockAlign(pkt->getAddr())) )
 		{
+			dramCache_rd_cpubypasses++;
 			allocateMissBuffer(pkt, curTick()+1, true);
 			return true;
 		}
@@ -1697,6 +1700,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		// if CPU request and GPU is running bypass
 		if (pkt->req->contextId() != 31 && CudaGPU::running)
 		{
+			dramCache_wr_cpubypasses++;
 			wrBypass(pkt);
 			return true;
 		}
@@ -1796,6 +1800,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		// found in PAM Queue
 		if (pr->isHit == -1)
 		{
+			dramCache_pam_returned_before_access++;
 			// DRAMCache hasn't done access so we dont know hit or miss
 			// we put the data returned from this packet, that came from DRAM
 			// into the first target of the MSHR for use incase of a miss
@@ -2339,6 +2344,10 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_cpu_replaced_gpu")
 		.desc ("Number of times cpu replaced gpu line");
 
+   dramCache_gpu_replaced_gpu
+       .name (name () + ".dramCache_gpu_replaced_gpu")
+       .desc ("Number of times gpu replaced gpu line");
+
 	switched_to_gpu_line
 		.name (name () + ".switched_to_gpu_line")
 		.desc ("Number of times CPU line became GPU line in cache ");
@@ -2371,6 +2380,22 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_cpu_writebuffer_hits")
 		.desc ("Number of hits for CPU requests in the writebuffer");
 
+	dramCache_tot_mshr_used
+	    .name (name () + ".dramCache_tot_mshr_used")
+	    .desc("total number of mshr used");
+
+	dramCache_tot_writebuffer_used
+        .name (name () + ".dramCache_tot_writebuffer_used")
+        .desc("total number of writebuffers used");
+
+	dramCache_max_mshr_used
+        .name (name () + ".dramCache_max_mshr_used")
+        .desc("max number of mshr used at any point");
+
+	dramCache_max_writebuffer_used
+        .name (name () + ".dramCache_max_writebuffer_used")
+        .desc("max number of writebuffers used at any point");
+
 	dramCache_max_gpu_dirty_lines
 		.name (name () + ".dramCache_max_gpu_dirty_lines")
 		.desc ("maximum number of gpu dirty lines in cache");
@@ -2386,6 +2411,22 @@ DRAMCacheCtrl::regStats ()
 	dramCache_incorrect_pred
 		.name ( name() + ".dramCache_incorrect_pred")
 		.desc("Number of incorrect predictions");
+
+	dramCache_pam_requests
+	    .name ( name() + ".dramCache_pam_requests")
+		.desc("Number of pam requests sent");
+
+	dramCache_pam_returned_before_access
+	    .name ( name() + ".dramCache_pam_returned_before_access")
+		.desc("times pam returned before access in cache completed");
+
+	dramCache_rd_cpubypasses
+	    .name( name() + ".dramCache_rd_cpubypasses")
+		.desc("Number of cpu read bypasses");
+
+	dramCache_wr_cpubypasses
+	    .name( name() + ".dramCache_wr_cpubypasses")
+		.desc("Number of cpu write bypasses");
 
 	dramCache_noncpu0_cpu_accesses
 		.name (name () + ".dramCache_noncpu0_cpu_accesses")
@@ -2495,6 +2536,7 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".blocked_cycles")
 		.desc ("number of cycles access was blocked")
 		.subname (Blocked_NoMSHRs,"no_mshrs")
+		.subname (Blocked_NoWBuffers,"no_wbuffers")
 		.subname (Blocked_NoTargets, "no_targets");
 
 	blocked_causes
@@ -2502,6 +2544,7 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".blocked")
 		.desc ("number of times access was blocked")
 		.subname (Blocked_NoMSHRs,"no_mshrs")
+		.subname (Blocked_NoWBuffers,"no_wbuffers")
 		.subname (Blocked_NoTargets, "no_targets");
 
     totWrQLat
