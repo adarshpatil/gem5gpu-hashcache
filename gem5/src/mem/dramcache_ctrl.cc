@@ -94,6 +94,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	inform("DRAMCache writeLowThreshold %d writeHighThreshold %d\n",
 			writeLowThreshold, writeHighThreshold);
 	inform("DRAMCache address mapping %d, page mgmt %d", addrMapping, pageMgmt);
+	inform("DRAMCache mshrs %d, writebuffers %d", p->mshrs , p->write_buffers);
 }
 
 void
