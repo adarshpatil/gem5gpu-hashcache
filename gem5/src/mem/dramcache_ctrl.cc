@@ -2291,6 +2291,14 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_cpu_writebuffer_hits")
 		.desc ("Number of hits for CPU requests in the writebuffer");
 
+    dramCache_pam_requests
+        .name ( name() + ".dramCache_pam_requests")
+        .desc("Number of pam requests sent");
+
+    dramCache_pam_returned_before_access
+        .name ( name() + ".dramCache_pam_returned_before_access")
+        .desc("times pam returned before access in cache completed");
+
 	dramCache_max_gpu_dirty_lines
 		.name (name () + ".dramCache_max_gpu_dirty_lines")
 		.desc ("maximum number of gpu dirty lines in cache");
@@ -2306,14 +2314,6 @@ DRAMCacheCtrl::regStats ()
 	dramCache_incorrect_pred
 		.name ( name() + ".dramCache_incorrect_pred")
 		.desc("Number of incorrect predictions");
-
-	dramCache_pam_requests
-	    .name ( name() + ".dramCache_pam_requests")
-	    .desc("Number of pam requests sent");
-
-	dramCache_pam_returned_before_access
-	    .name ( name() + ".dramCache_pam_returned_before_access")
-	    .desc("times pam returned before access in cache completed");
 
 	dramCache_noncpu0_cpu_accesses
 		.name (name () + ".dramCache_noncpu0_cpu_accesses")
@@ -2423,6 +2423,7 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".blocked_cycles")
 		.desc ("number of cycles access was blocked")
 		.subname (Blocked_NoMSHRs,"no_mshrs")
+		.subname (Blocked_NoWBuffers,"no_wbuffers")
 		.subname (Blocked_NoTargets, "no_targets");
 
 	blocked_causes
@@ -2430,6 +2431,7 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".blocked")
 		.desc ("number of times access was blocked")
 		.subname (Blocked_NoMSHRs,"no_mshrs")
+		.subname (Blocked_NoWBuffers,"no_wbuffers")
 		.subname (Blocked_NoTargets, "no_targets");
 
     totWrQLat
