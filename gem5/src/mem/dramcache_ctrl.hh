@@ -265,7 +265,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_cpu_hits;   // hits for CPU req
 	Stats::Scalar dramCache_cpu_misses; // misses for CPU req
 	// histogram grouping of set numbers (1000 buckets) and number of times sets were occupied by GPU
-	Stats::Histogram dramCache_gpu_occupancy_per_set;
+	//Stats::Histogram dramCache_gpu_occupancy_per_set;
 
 	Stats::Scalar dramCache_mshr_hits;
 	Stats::Scalar dramCache_cpu_mshr_hits;
@@ -281,6 +281,14 @@ class DRAMCacheCtrl : public DRAMCtrl
 	// - chaining kicks in only in cpu lines are lesser than low thresh
 	// - meaning gpu should be hungry and occupy a lots of lines in the cache
 	Stats::Scalar dramCache_max_gpu_lines;
+	// max gpu lines at row granularity
+	Stats::Vector dramCache_max_gpu_lines_per_row;
+	Stats::Vector dramCache_accesses_per_row;
+	Stats::Vector dramCache_gpu_accesses_per_row;
+	// number of times the max gpu lines was above 20%,50%,80% in each row
+	Stats::Vector dramCache_max_gpu_lines_per_row_above_20;
+	Stats::Vector dramCache_max_gpu_lines_per_row_above_50;
+	Stats::Vector dramCache_max_gpu_lines_per_row_above_80;
 	Stats::Vector dramCache_mshr_miss_latency; // Total cycle latency of MSHR [0]-cpu [1]-gpu
 	Stats::Scalar dramCache_total_pred; // number of predictions made
 	Stats::Scalar dramCache_incorrect_pred; // number of miss predictions by predictor

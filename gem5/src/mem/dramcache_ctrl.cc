@@ -128,6 +128,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 	unsigned int cacheBlock = pkt->getAddr () / dramCache_block_size;
 	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
 	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+	unsigned int cacheRow = cacheSet / 15;
+	dramCache_accesses_per_row[cacheRow]++;
 	DPRINTF(DRAMCache, "%s pktAddr:%d, blockid:%d set:%d tag:%d\n", __func__,
 			pkt->getAddr(), cacheBlock, cacheSet, cacheTag);
 	assert(cacheSet >= 0);
@@ -135,6 +137,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 
 	if ( pkt->req->contextId() == 31 )
 	{
+		dramCache_gpu_accesses_per_row[cacheRow]++;
 		// sample max_gpu_lines once in every 10 GPU accesses
 		max_gpu_lines_sample_counter = (max_gpu_lines_sample_counter + 1)%10;
 		if (max_gpu_lines_sample_counter == 0)
@@ -142,6 +145,24 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			total_gpu_lines = count(isGPUOwned.begin(), isGPUOwned.end(), true);
 			if(total_gpu_lines > dramCache_max_gpu_lines.value())
 				dramCache_max_gpu_lines = total_gpu_lines;
+
+			int gpu_row_counter = 0;
+			auto isGPUOwned_itr = isGPUOwned.begin();
+			for(int r=0;r<totalRows;r++)
+			{
+				gpu_row_counter = count(isGPUOwned_itr+(r*15), isGPUOwned_itr+((15*(r+1))-1), true);
+				if (gpu_row_counter > dramCache_max_gpu_lines_per_row[r].value())
+					dramCache_max_gpu_lines_per_row[r] = gpu_row_counter;
+
+				if (gpu_row_counter > 3)
+					dramCache_max_gpu_lines_per_row_above_20[r]++;
+
+				if (gpu_row_counter > 7)
+					dramCache_max_gpu_lines_per_row_above_50[r]++;
+
+				if (gpu_row_counter > 12)
+					dramCache_max_gpu_lines_per_row_above_80[r]++;
+			}
 		}
 	}
 	else if(pkt->req->contextId() != 0)
@@ -231,8 +252,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			DPRINTF(DRAMCache, "GPU request %d is a %s miss\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
 
-			if (pkt->isRead() || (pkt->isWrite() && dramCache_write_allocate))
-				dramCache_gpu_occupancy_per_set.sample(cacheSet);
+			//if (pkt->isRead() || (pkt->isWrite() && dramCache_write_allocate))
+			//	dramCache_gpu_occupancy_per_set.sample(cacheSet);
 
 			if (set[cacheSet].valid) // valid line - causes eviction
 			{
@@ -2242,8 +2263,8 @@ DRAMCacheCtrl::regStats ()
 		.desc ("Number of write hits in dramcache");
 
 	dramCache_write_misses
-	.name (name () + ".dramCache_write_misses")
-	.desc ("Number of write misses in dramcache");
+	    .name (name () + ".dramCache_write_misses")
+	    .desc ("Number of write misses in dramcache");
 
 	dramCache_cpu_read_hits
 		.name (name () + ".dramCache_cpu_read_hits")
@@ -2322,11 +2343,11 @@ DRAMCacheCtrl::regStats ()
 		.desc ("Number of hits for CPU requests in the writebuffer");
 
     dramCache_pam_requests
-        .name ( name() + ".dramCache_pam_requests")
+        .name (name() + ".dramCache_pam_requests")
         .desc("Number of pam requests sent");
 
     dramCache_pam_returned_before_access
-        .name ( name() + ".dramCache_pam_returned_before_access")
+        .name (name() + ".dramCache_pam_returned_before_access")
         .desc("times pam returned before access in cache completed");
 
 	dramCache_max_gpu_dirty_lines
@@ -2337,12 +2358,48 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_max_gpu_lines")
 		.desc ("maximum number of gpu lines in cache");
 
+	dramCache_max_gpu_lines_per_row
+		.init (totalRows)
+		.name (name()+ ".dramCache_max_gpu_lines_per_row")
+		.desc ("max gpu lines per row")
+		.flags (nozero);
+
+	dramCache_accesses_per_row
+		.init (totalRows)
+		.name (name() + ".dramCache_accesses_per_row")
+		.desc ("total num of accesses per row")
+		.flags (nozero);
+
+	dramCache_gpu_accesses_per_row
+		.init (totalRows)
+		.name (name() + ".dramCache_gpu_accesses_per_row")
+		.desc ("total num of gpu accesses per row")
+		.flags (nozero);
+
+	dramCache_max_gpu_lines_per_row_above_20
+		.init (totalRows)
+		.name (name () + ".dramCache_max_gpu_lines_per_row_above_20")
+		.desc ("number of times gpu occupancy was above 20%")
+		.flags (nozero);
+
+	dramCache_max_gpu_lines_per_row_above_50
+		.init (totalRows)
+		.name (name () + ".dramCache_max_gpu_lines_per_row_above_50")
+		.desc ("number of times gpu occupancy was above 50%")
+		.flags (nozero);
+
+	dramCache_max_gpu_lines_per_row_above_80
+		.init (totalRows)
+		.name (name ()+".dramCache_max_gpu_lines_per_row_above_80")
+		.desc ("number of times gpu occupancy was above 80%")
+		.flags (nozero);
+
 	dramCache_total_pred
-		.name ( name() + ".dramCache_total_pred")
+		.name (name() + ".dramCache_total_pred")
 		.desc("total number of predictions made");
 
 	dramCache_incorrect_pred
-		.name ( name() + ".dramCache_incorrect_pred")
+		.name (name() + ".dramCache_incorrect_pred")
 		.desc("Number of incorrect predictions");
 
 	dramCache_noncpu0_cpu_accesses
@@ -2383,11 +2440,11 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_mshr_miss_latency")
 		.desc ("total miss latency of mshr for cpu and gpu");
 
-	dramCache_gpu_occupancy_per_set
-		.init (1000)
-		.name (name () + ".dramCache_gpu_occupancy_per_set")
-		.desc ("Number of times the way was occupied by GPU line")
-		.flags (nozero);
+	//dramCache_gpu_occupancy_per_set
+	//	.init (1000)
+	//	.name (name () + ".dramCache_gpu_occupancy_per_set")
+	//	.desc ("Number of times the way was occupied by GPU line")
+	//	.flags (nozero);
 
 	dramCache_max_gpu_occupancy
 		.name (name() + ".dramCache_max_gpu_occupancy")
