@@ -609,6 +609,8 @@ class DRAMCtrl : public AbstractMemory
      */
     bool reorderQueue(std::deque<DRAMPacket*>& queue, Tick extra_col_delay);
 
+    bool reorderQueueCPUPrio(std::deque<DRAMPacket*>& queue, Tick extra_col_delay);
+
     /**
      * Find which are the earliest banks ready to issue an activate
      * for the enqueued requests. Assumes maximum of 64 banks per DIMM

@@ -793,6 +793,8 @@ DRAMCtrl::chooseNext(std::deque<DRAMPacket*>& queue, Tick extra_col_delay)
         }
     } else if (memSchedPolicy == Enums::frfcfs) {
         found_packet = reorderQueue(queue, extra_col_delay);
+    } else if (memSchedPolicy == Enums::cpuPriorityfrfcfs) {
+        found_packet = reorderQueueCPUPrio(queue, extra_col_delay);
     } else
         panic("No scheduling policy chosen\n");
     return found_packet;
@@ -879,6 +881,145 @@ DRAMCtrl::reorderQueue(std::deque<DRAMPacket*>& queue, Tick extra_col_delay)
                     // col-to-col command requirements
                     if (hidden_bank_prep || !found_prepped_pkt)
                         selected_pkt_it = i;
+                }
+            }
+        }
+    }
+
+    if (selected_pkt_it != queue.end()) {
+        DRAMPacket* selected_pkt = *selected_pkt_it;
+        queue.erase(selected_pkt_it);
+        queue.push_front(selected_pkt);
+        return true;
+    }
+
+    return false;
+}
+
+bool
+DRAMCtrl::reorderQueueCPUPrio(std::deque<DRAMPacket*>& queue, Tick extra_col_delay)
+{
+    // Only determine this if needed
+    uint64_t earliest_banks = 0;
+    bool hidden_bank_prep = false;
+
+    // search for seamless row hits first, if no seamless row hit is
+    // found then determine if there are other packets that can be issued
+    // without incurring additional bus delay due to bank timing
+    // Will select closed rows first to enable more open row possibilies
+    // in future selections
+    bool found_hidden_bank = false;
+
+    // remember if we found a row hit, not seamless, but bank prepped
+    // and ready
+    bool found_prepped_pkt = false;
+    bool found_prepped_cpu_pkt = false;
+
+    // if we have no row hit, prepped or not, and no seamless packet,
+    // just go for the earliest possible
+    bool found_earliest_pkt = false;
+    bool found_earliest_cpu_pkt = false;
+
+    auto selected_pkt_it = queue.end();
+
+    // time we need to issue a column command to be seamless
+    const Tick min_col_at = std::max(busBusyUntil - tCL + extra_col_delay,
+                                     curTick());
+
+    for (auto i = queue.begin(); i != queue.end() ; ++i) {
+        DRAMPacket* dram_pkt = *i;
+        const Bank& bank = dram_pkt->bankRef;
+
+        ContextID pkt_cid;
+        // fillQueue requests don't have pkt reference
+        // for these we just set pkt_cid to 0;
+        if (dram_pkt->isFill)
+            pkt_cid = 0;
+        else
+            pkt_cid = dram_pkt->pkt->req->contextId();
+
+        // check if rank is available, if not, jump to the next packet
+        if (dram_pkt->rankRef.isAvailable()) {
+            // check if it is a row hit
+            if (bank.openRow == dram_pkt->row) {
+                // no additional rank-to-rank or same bank-group
+                // delays, or we switched read/write and might as well
+                // go for the row hit
+                if (bank.colAllowedAt <= min_col_at) {
+                    // FCFS within the hits, giving priority to
+                    // commands that can issue seamlessly, without
+                    // additional delay, such as same rank accesses
+                    // and/or different bank-group accesses
+                    DPRINTF(DRAM, "Seamless row buffer hit\n");
+                    selected_pkt_it = i;
+                    // no need to look through the remaining queue entries
+                    break;
+                } else if (!found_hidden_bank && !found_prepped_cpu_pkt) {
+                    // if we did not find a packet to a closed row that can
+                    // issue the bank commands without incurring delay, and
+                    // did not yet find a packet to a prepped row, remember
+                    // the current one
+
+                    // first cpu prepped pkt else
+                    // first gpu prepped pkt if a cpu prepped pkt is not found
+                    if (pkt_cid != 31)
+                    {
+                        selected_pkt_it = i;
+                        found_prepped_cpu_pkt = true;
+                        found_prepped_pkt = true;
+                        DPRINTF(DRAM, "CPU pkt, Prepped row buffer hit\n");
+                    }
+                    else if (!found_prepped_pkt)
+                    {
+                        selected_pkt_it = i;
+                        found_prepped_pkt = true;
+                        DPRINTF(DRAM, "GPU pkt, Prepped row buffer hit\n");
+                    }
+                }
+            } else if (!found_earliest_cpu_pkt) {
+                // if we have not initialised the bank status, do it
+                // now, and only once per scheduling decisions
+                if (earliest_banks == 0) {
+                    // determine entries with earliest bank delay
+                    pair<uint64_t, bool> bankStatus =
+                        minBankPrep(queue, min_col_at);
+                    earliest_banks = bankStatus.first;
+                    hidden_bank_prep = bankStatus.second;
+                }
+
+                // first cpu earliest pkt else
+                // first gpu earliest pkt if a cpu pkt is not found
+                if (pkt_cid != 31)
+                {
+                    // bank is amongst first available banks
+                    // minBankPrep will give priority to packets that can
+                    // issue seamlessly
+                    if (bits(earliest_banks, dram_pkt->bankId, dram_pkt->bankId)) {
+                        found_earliest_cpu_pkt = true;
+                        found_earliest_pkt = true;
+                        found_hidden_bank = hidden_bank_prep;
+
+                        // give priority to packets that can issue
+                        // bank commands 'behind the scenes'
+                        // any additional delay if any will be due to
+                        // col-to-col command requirements
+                        if (hidden_bank_prep || !found_prepped_pkt) {
+                            selected_pkt_it = i;
+                            DPRINTF(DRAM,"CPU Earliest pkt found\n");
+                        }
+                    }
+                }
+                else if (!found_earliest_pkt)
+                {
+                    if (bits(earliest_banks, dram_pkt->bankId, dram_pkt->bankId)) {
+                        found_earliest_pkt = true;
+                        found_hidden_bank = hidden_bank_prep;
+
+                        if (hidden_bank_prep || !found_prepped_pkt) {
+                            selected_pkt_it = i;
+                            DPRINTF(DRAM, "GPU Earliest pkt found\n");
+                        }
+                    }
                 }
             }
         }
