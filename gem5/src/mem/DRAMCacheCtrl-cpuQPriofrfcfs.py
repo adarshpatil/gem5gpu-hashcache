@@ -34,7 +34,7 @@ class DRAMCacheCtrl(DRAMCtrl):
     # start emptying the fill buffer when busState is write
     fill_high_thresh_perc = Param.Percent(85, "Threshold to force fills")
 
-    fill_buffer_size = Param.Unsigned(64, "Number of fill queue entries")
+    fill_buffer_size = Param.Unsigned(128, "Number of fill queue entries")
 
     prediction_accuracy = Param.Unsigned(95, "Required prediction accuracy")
 
@@ -201,18 +201,18 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     # write_buffer_size = 8
     # read_buffer_size = 8
     # ADARSH Since we double both num of layers and size of each layer, we x4 buffer sizes
-    write_buffer_size = 32
-    read_buffer_size = 32
+    write_buffer_size = 128
+    read_buffer_size = 128
     addr_mapping = 'RoRaBaCoCh'
     min_writes_per_switch = 8
 
     # ADARSH FCFS policy for closed page in cache
-    mem_sched_policy = 'frfcfs'
+    mem_sched_policy = 'cpuPriorityfrfcfs'
 
     mshrs = 128
     tgts_per_mshr = 16
 
     # for dramcache this write theshold is (cache writes + cache fills)
-    write_high_thresh_perc = 36
-    write_low_thresh_perc = 18
+    write_high_thresh_perc = 9
+    write_low_thresh_perc = 4
     min_writes_per_switch = 10
