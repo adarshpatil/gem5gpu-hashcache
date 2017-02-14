@@ -903,6 +903,8 @@ DRAMCtrl::reorderQueueCPUPrio(std::deque<DRAMPacket*>& queue, Tick extra_col_del
     uint64_t earliest_banks = 0;
     bool hidden_bank_prep = false;
 
+    bool found_seamless_pkt = false;
+
     // search for seamless row hits first, if no seamless row hit is
     // found then determine if there are other packets that can be issued
     // without incurring additional bus delay due to bank timing
@@ -930,13 +932,7 @@ DRAMCtrl::reorderQueueCPUPrio(std::deque<DRAMPacket*>& queue, Tick extra_col_del
         DRAMPacket* dram_pkt = *i;
         const Bank& bank = dram_pkt->bankRef;
 
-        ContextID pkt_cid;
-        // fillQueue requests don't have pkt reference
-        // for these we just set pkt_cid to 0;
-        if (dram_pkt->isFill)
-            pkt_cid = 0;
-        else
-            pkt_cid = dram_pkt->pkt->req->contextId();
+        ContextID pkt_cid = dram_pkt->contextId;
 
         // check if rank is available, if not, jump to the next packet
         if (dram_pkt->rankRef.isAvailable()) {
@@ -950,11 +946,21 @@ DRAMCtrl::reorderQueueCPUPrio(std::deque<DRAMPacket*>& queue, Tick extra_col_del
                     // commands that can issue seamlessly, without
                     // additional delay, such as same rank accesses
                     // and/or different bank-group accesses
-                    DPRINTF(DRAM, "Seamless row buffer hit\n");
-                    selected_pkt_it = i;
-                    // no need to look through the remaining queue entries
-                    break;
-                } else if (!found_hidden_bank && !found_prepped_cpu_pkt) {
+
+                    // iterate till we find cpu seamless hit pkt
+                    // else first gpu seamless hit pkt
+                    if (pkt_cid != 31) {
+                        selected_pkt_it = i;
+                        DPRINTF(DRAM,"CPU Seamless row buffer hit\n");
+                        // no need to look through the remaining queue entries
+                        break;
+                    } else if (!found_seamless_pkt) {
+                        selected_pkt_it = i;
+                        found_seamless_pkt = true;
+                        DPRINTF(DRAM,"GPU Seamless row buffer hit\n");
+                    }
+                } else if (!found_hidden_bank && !found_prepped_cpu_pkt
+                           && !found_seamless_pkt) {
                     // if we did not find a packet to a closed row that can
                     // issue the bank commands without incurring delay, and
                     // did not yet find a packet to a prepped row, remember
@@ -976,7 +982,7 @@ DRAMCtrl::reorderQueueCPUPrio(std::deque<DRAMPacket*>& queue, Tick extra_col_del
                         DPRINTF(DRAM, "GPU pkt, Prepped row buffer hit\n");
                     }
                 }
-            } else if (!found_earliest_cpu_pkt) {
+            } else if (!found_earliest_cpu_pkt && !found_seamless_pkt) {
                 // if we have not initialised the bank status, do it
                 // now, and only once per scheduling decisions
                 if (earliest_banks == 0) {
