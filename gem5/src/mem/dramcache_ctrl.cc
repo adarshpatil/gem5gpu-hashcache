@@ -2270,15 +2270,15 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_cpu_read_hits")
 		.desc ("Number of read hits in dramcache");
 
-	dramCache_read_misses
+	dramCache_cpu_read_misses
 		.name (name () + ".dramCache_cpu_read_misses")
 		.desc ("Number of read misses in dramcache");
 
-	dramCache_write_hits
+	dramCache_cpu_write_hits
 		.name (name () + ".dramCache_cpu_write_hits")
 		.desc ("Number of write hits in dramcache");
 
-	dramCache_write_misses
+	dramCache_cpu_write_misses
 	    .name (name () + ".dramCache_cpu_write_misses")
 	    .desc ("Number of write misses in dramcache");
 
