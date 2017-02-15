@@ -248,6 +248,10 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_read_misses;
 	Stats::Scalar dramCache_write_hits;
 	Stats::Scalar dramCache_write_misses;
+	Stats::Scalar dramCache_cpu_read_hits;
+	Stats::Scalar dramCache_cpu_read_misses;
+	Stats::Scalar dramCache_cpu_write_hits;
+	Stats::Scalar dramCache_cpu_write_misses;
 	Stats::Scalar dramCache_evicts;
 	Stats::Scalar dramCache_write_backs;
 	Stats::Scalar dramCache_write_backs_on_read;

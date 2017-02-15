@@ -193,10 +193,16 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		}
 
 		if (pkt->isRead ())
+		{
 			dramCache_read_hits++;
+			if (pkt->req->contextId()!=31)
+				dramCache_cpu_read_hits++;
+		}
 		else
 		{
 			dramCache_write_hits++;
+			if (pkt->req->contextId()!=31)
+				dramCache_cpu_write_hits++;
 
 			if (!set[cacheSet].dirty && isGPUOwned[cacheSet]) // write to a clean line & GPU owned
 			{
@@ -295,10 +301,16 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		// adding to MSHR will be done elsewhere
 
 		if (pkt->isRead ())
+		{
 			dramCache_read_misses++;
+			if (pkt->req->contextId()!=31)
+				dramCache_cpu_read_misses++;
+		}
 		else
 		{
 			dramCache_write_misses++;
+			if (pkt->req->contextId()!=31)
+				dramCache_cpu_write_misses++;
 			// gpu requesting a write and existing line was clean and not GPU owned
 			if (pkt->req->contextId () == 31 &&
 					!(set[cacheSet].dirty && isGPUOwned[cacheSet]) &&
@@ -2294,8 +2306,24 @@ DRAMCacheCtrl::regStats ()
 		.desc ("Number of write hits in dramcache");
 
 	dramCache_write_misses
-	.name (name () + ".dramCache_write_misses")
-	.desc ("Number of write misses in dramcache");
+	    .name (name () + ".dramCache_write_misses")
+	    .desc ("Number of write misses in dramcache");
+
+	dramCache_cpu_read_hits
+		.name (name () + ".dramCache_cpu_read_hits")
+		.desc ("Number of read hits in dramcache");
+
+	dramCache_cpu_read_misses
+		.name (name () + ".dramCache_cpu_read_misses")
+		.desc ("Number of read misses in dramcache");
+
+	dramCache_cpu_write_hits
+		.name (name () + ".dramCache_cpu_write_hits")
+		.desc ("Number of write hits in dramcache");
+
+	dramCache_cpu_write_misses
+	    .name (name () + ".dramCache_cpu_write_misses")
+	    .desc ("Number of write misses in dramcache");
 
 	dramCache_evicts
 		.name (name () + ".dramCache_evicts")
