@@ -487,6 +487,16 @@ class DRAMCtrl : public AbstractMemory
               bankRef(bank_ref), rankRef(rank_ref)
         { }
 
+        // copy constructor, only address is changed; used for chained access
+        DRAMPacket(DRAMPacket* dram_pkt, Addr _addr)
+            : entryTime(curTick()), readyTime(curTick()),
+              pkt(dram_pkt->pkt), isRead(dram_pkt->isRead), isFill(false),
+              contextId(dram_pkt->contextId), rank(dram_pkt->rank),
+              bank(dram_pkt->bank), row(dram_pkt->row), bankId(dram_pkt->bankId),
+              addr(_addr), size(dram_pkt->size), burstHelper(NULL),
+              bankRef(dram_pkt->bankRef), rankRef(dram_pkt->rankRef)
+        { }
+
     };
 
     /**

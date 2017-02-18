@@ -11,7 +11,7 @@
 #include "mem/ruby/system/RubyPort.hh"
 #include "sim/system.hh"
 
-#include <algorithm>
+#include <functional>
 
 using namespace std;
 using namespace Data;
@@ -19,6 +19,7 @@ using namespace Data;
 
 map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
 int DRAMCacheCtrl::predAccuracy;
+int DRAMCacheCtrl::chainingThreshold;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
@@ -45,6 +46,10 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 			* ranksPerChannel;
 
 	DRAMCacheCtrl::predAccuracy = p->prediction_accuracy;
+	DRAMCacheCtrl::chainingThreshold = p->chaining_threshold;
+
+	cpuBypassTag = new LRUTagStore(this, p->bypass_tag_size);
+	bypassTagEnable = p->bypass_tag_enable;
 
 	rowsPerBank = (1024 * 1024 * deviceCapacity)
             / (rowBufferSize * banksPerRank * ranksPerChannel);
@@ -111,6 +116,13 @@ DRAMCacheCtrl::init ()
 			set[i].written[j] = 0;
 		}*/
 	}
+	chainTable.resize(dramCache_num_sets);
+	chainTable.assign(dramCache_num_sets,0);
+	reverseChainTable.resize(dramCache_num_sets);
+	reverseChainTable.assign(dramCache_num_sets,0);
+
+	isRowChained.resize(totalRows);
+	isRowChained.assign(totalRows,false);
 }
 
 DRAMCacheCtrl*
@@ -135,13 +147,30 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 
 	if ( pkt->req->contextId() == 31 )
 	{
-		// sample max_gpu_lines once in every 10 GPU accesses
-		max_gpu_lines_sample_counter = (max_gpu_lines_sample_counter + 1)%10;
+		// sample max_gpu_lines once in every 50 GPU accesses
+		max_gpu_lines_sample_counter = (max_gpu_lines_sample_counter + 1)%50;
 		if (max_gpu_lines_sample_counter == 0)
 		{
 			total_gpu_lines = count(isGPUOwned.begin(), isGPUOwned.end(), true);
 			if(total_gpu_lines > dramCache_max_gpu_lines.value())
 				dramCache_max_gpu_lines = total_gpu_lines;
+/*			uint64_t total_count;
+
+			// total chained rows
+			total_count = count(isRowChained.begin(), isRowChained.end(), true);
+			if(total_count > dramCache_max_chained_rows.value())
+				dramCache_max_chained_rows = total_count;
+			dramCache_avg_chained_rows =
+					(dramCache_avg_chained_rows + total_count)/2;
+
+			// total chained sets - nonzero values in chainTable
+			total_count = count_if(chainTable.begin(), chainTable.end(),
+							bind1st(less<uint8_t>(), 0));
+			if(total_count > dramCache_max_chained_sets.value())
+				dramCache_max_chained_sets = total_count;
+
+			dramCache_avg_chained_sets =
+					(dramCache_avg_chained_sets.value() + total_count)/2;*/
 		}
 	}
 	else if(pkt->req->contextId() != 0)
@@ -231,8 +260,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			DPRINTF(DRAMCache, "GPU request %d is a %s miss\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
 
-			if (pkt->isRead() || (pkt->isWrite() && dramCache_write_allocate))
-				dramCache_gpu_occupancy_per_set.sample(cacheSet);
+			// if (pkt->isRead() || (pkt->isWrite() && dramCache_write_allocate))
+			//	 dramCache_gpu_occupancy_per_set.sample(cacheSet);
 
 			if (set[cacheSet].valid) // valid line - causes eviction
 			{
@@ -295,6 +324,28 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			dramCache_read_misses++;
 			if (pkt->req->contextId () != 31)
 				dramCache_cpu_read_misses++;
+
+/*			// check if set is chained
+			if (chainTable[cacheSet]!=0)
+			{
+				// the chained set needs to valid
+				assert(set[(cacheSet+chainTable[cacheSet])].valid!=false);
+				dramCache_chain_gpu_access++;
+				if(set[(cacheSet+chainTable[cacheSet])].tag == cacheTag)
+
+
+			}
+
+			// check if set is chained
+			if (chainTable[cacheSet]!=0)
+			{
+				// the chained set needs to valid
+				assert(set[(cacheSet+chainTable[cacheSet])].valid!=false);
+				dramCache_chain_gpu_access;
+				if(set[(cacheSet+chainTable[cacheSet])].tag == cacheTag)
+
+
+			}*/
 		}
 		else
 		{
@@ -890,6 +941,20 @@ DRAMCacheCtrl::processRespondEvent ()
 
 			// Now access is complete, TAD unit available => doCacheLookup
 			bool isHit = doCacheLookup (dram_pkt->pkt);
+
+			// check if chainLookup is needed
+			// if chaining needed create 2 dram packets and call
+			DRAMPacket *chain_dram_pkt1 = new DRAMPacket (dram_pkt, dram_pkt->addr+1);
+			DRAMPacket *chain_dram_pkt2 = new DRAMPacket (dram_pkt, dram_pkt->addr+2);
+
+            doChainedDRAMAccess(chain_dram_pkt1);
+            doChainedDRAMAccess(chain_dram_pkt2);
+
+            //uint64_t chainLookupDelay = chain_dram_pkt2.readyTime;
+                       delete chain_dram_pkt1;
+                       delete chain_dram_pkt2;
+
+
 
 #ifdef MAPI_PREDICTOR
 			auto pamQueueItr =  pamQueue.find(dram_pkt->pkt->getAddr());
@@ -1616,6 +1681,19 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		return true;
 	}
 
+	if (bypassTagEnable)
+	{
+		cpuBypassTag->num_accesses++;
+		if (cpuBypassTag->isHit(pkt))
+		{
+			cpuBypassTag->num_hits++;
+			if (pkt->isRead())
+				allocateMissBuffer(pkt, curTick()+PREDICTION_LATENCY, true);
+			else if (pkt->isWrite())
+				allocateWriteBuffer(pkt, curTick()+PREDICTION_LATENCY);
+		}
+	}
+
 #ifdef PASS_PC
 	// perform prediction using cache address; lookup RubyPort::predictorTable
 	int cid = pkt->req->contextId();
@@ -1959,6 +2037,94 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 }
 
 void
+DRAMCacheCtrl::doChainedDRAMAccess(DRAMPacket* dram_pkt)
+{
+       DPRINTF(DRAMCache,"Chained Timing access to addr %lld, rank/bank/row %d %d %d\n",
+            dram_pkt->addr, dram_pkt->rank, dram_pkt->bank, dram_pkt->row);
+
+    // get the rank
+    //Rank& rank = dram_pkt->rankRef;
+
+    // get the bank
+    Bank& bank = dram_pkt->bankRef;
+
+    // respect any constraints on the command (e.g. tRCD or tCCD)
+    Tick cmd_at = std::max(bank.colAllowedAt, curTick());
+
+    // we need to wait until the bus is available before we can issue
+    // the command
+    cmd_at = std::max(cmd_at, busBusyUntil - tCL);
+
+    // update the packet ready time
+    dram_pkt->readyTime = cmd_at + tCL + tBURST;
+
+    // only one burst can use the bus at any one point in time
+    assert(dram_pkt->readyTime - busBusyUntil >= tBURST);
+
+    // update the time for the next read/write burst for each
+    // bank (add a max with tCCD/tCCD_L here)
+    Tick cmd_dly;
+    for(int j = 0; j < ranksPerChannel; j++) {
+        for(int i = 0; i < banksPerRank; i++) {
+            // next burst to same bank group in this rank must not happen
+            // before tCCD_L.  Different bank group timing requirement is
+            // tBURST; Add tCS for different ranks
+            if (dram_pkt->rank == j) {
+                if (bankGroupArch &&
+                   (bank.bankgr == ranks[j]->banks[i].bankgr)) {
+                    // bank group architecture requires longer delays between
+                    // RD/WR burst commands to the same bank group.
+                    // Use tCCD_L in this case
+                    cmd_dly = tCCD_L;
+                } else {
+                    // use tBURST (equivalent to tCCD_S), the shorter
+                    // cas-to-cas delay value, when either:
+                    // 1) bank group architecture is not supportted
+                    // 2) bank is in a different bank group
+                    cmd_dly = tBURST;
+                }
+            } else {
+                // different rank is by default in a different bank group
+                // use tBURST (equivalent to tCCD_S), which is the shorter
+                // cas-to-cas delay in this case
+                // Add tCS to account for rank-to-rank bus delay requirements
+                cmd_dly = tBURST + tCS;
+            }
+            ranks[j]->banks[i].colAllowedAt = std::max(cmd_at + cmd_dly,
+                                             ranks[j]->banks[i].colAllowedAt);
+        }
+    }
+
+    // Save rank of current access
+    activeRank = dram_pkt->rank;
+
+    // If this is a write, we also need to respect the write recovery
+    // time before a precharge, in the case of a read, respect the
+    // read to precharge constraint
+    bank.preAllowedAt = std::max(bank.preAllowedAt,
+                                 dram_pkt->isRead ? cmd_at + tRTP :
+                                 dram_pkt->readyTime + tWR);
+
+    // increment the bytes accessed and the accesses per row
+    bank.bytesAccessed += burstSize;
+    ++bank.rowAccesses;
+
+    // Update bus state
+    busBusyUntil = dram_pkt->readyTime;
+
+    DPRINTF(DRAMCache, "Chained Access to %lld, ready at %lld bus busy until %lld.\n",
+            dram_pkt->addr, dram_pkt->readyTime, busBusyUntil);
+
+    // Update the minimum timing between the requests, this is a
+    // conservative estimate of when we have to schedule the next
+    // request to not introduce any unecessary bubbles. In most cases
+    // we will wake up sooner than we have to.
+    nextReqTime = busBusyUntil - (tRP + tRCD + tCL);
+
+
+}
+
+void
 DRAMCacheCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
 {
 	//UPDATE the only change here is open adaptive and close adaptive scheme
@@ -2224,10 +2390,32 @@ DRAMCacheCtrl::drain()
 }
 
 void
+DRAMCacheCtrl::LRUTagStore::regStats()
+{
+	using namespace Stats;
+
+    num_hits
+	    .name (dramcache->name () + ".bypasstag_hits")
+        .desc ("num of hits in tag store");
+
+    num_accesses
+        .name (dramcache->name() + ".bypasstag_accesses")
+        .desc ("num of accesses in tag store");
+
+    hit_rate
+        .name (dramcache->name() + ".bypasstag_hit_rate")
+        .desc ("hit rate of the tag store");
+
+    hit_rate = num_hits / num_accesses;
+}
+
+void
 DRAMCacheCtrl::regStats ()
 {
 	using namespace Stats;
 	DRAMCtrl::regStats ();
+	if (bypassTagEnable)
+		cpuBypassTag->regStats();
 
 	dramCache_read_hits
 		.name (name () + ".dramCache_read_hits")
@@ -2242,22 +2430,22 @@ DRAMCacheCtrl::regStats ()
 		.desc ("Number of write hits in dramcache");
 
 	dramCache_write_misses
-	.name (name () + ".dramCache_write_misses")
-	.desc ("Number of write misses in dramcache");
+	    .name (name () + ".dramCache_write_misses")
+	    .desc ("Number of write misses in dramcache");
 
 	dramCache_cpu_read_hits
 		.name (name () + ".dramCache_cpu_read_hits")
 		.desc ("Number of read hits in dramcache");
 
-	dramCache_read_misses
+	dramCache_cpu_read_misses
 		.name (name () + ".dramCache_cpu_read_misses")
 		.desc ("Number of read misses in dramcache");
 
-	dramCache_write_hits
+	dramCache_cpu_write_hits
 		.name (name () + ".dramCache_cpu_write_hits")
 		.desc ("Number of write hits in dramcache");
 
-	dramCache_write_misses
+	dramCache_cpu_write_misses
 	    .name (name () + ".dramCache_cpu_write_misses")
 	    .desc ("Number of write misses in dramcache");
 
@@ -2383,11 +2571,11 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_mshr_miss_latency")
 		.desc ("total miss latency of mshr for cpu and gpu");
 
-	dramCache_gpu_occupancy_per_set
-		.init (1000)
-		.name (name () + ".dramCache_gpu_occupancy_per_set")
-		.desc ("Number of times the way was occupied by GPU line")
-		.flags (nozero);
+	//dramCache_gpu_occupancy_per_set
+	//	.init (1000)
+	//	.name (name () + ".dramCache_gpu_occupancy_per_set")
+	//	.desc ("Number of times the way was occupied by GPU line")
+	//	.flags (nozero);
 
 	dramCache_max_gpu_occupancy
 		.name (name() + ".dramCache_max_gpu_occupancy")
@@ -2501,6 +2689,106 @@ DRAMCacheCtrl::regStats ()
     gpuWrBusLat
         .name(name() + ".gpuWrBusLat")
         .desc("ticks spent in databus transfers for GPU Requests for writes");
+
+
+    // CHAINING STATS
+    dramCache_total_chained_sets
+        .name(name() + ".dramCache_total_chained_sets")
+        .desc("total num of sets chained");
+
+    dramCache_max_chained_sets
+        .name(name() + ".dramCache_max_chained_sets")
+        .desc("max num of sets chained");
+
+    dramCache_avg_chained_sets
+        .name(name() + ".dramCache_avg_chained_sets")
+        .desc("moving avg of sets chained");
+
+    dramCache_total_chained_rows
+        .name(name() + ".dramCache_total_chained_rows")
+        .desc("total num of rows chained");
+
+    dramCache_max_chained_rows
+        .name(name() + ".dramCache_max_chained_rows")
+        .desc("max num of rows chained");
+
+    dramCache_avg_chained_rows
+        .name(name() + ".dramCache_avg_chained_rows")
+        .desc("moving avg of rows chained");
+
+    dramCache_chain_read_hits
+        .name(name() + ".dramCache_chain_read_hits")
+        .desc("total num of chained read hits");
+
+    dramCache_chain_write_hits
+        .name(name() + ".dramCache_chain_write_hits")
+        .desc("total num of chained write hits");
+
+    dramCache_chain_read_misses
+        .name(name() + ".dramCache_chain_read_misses")
+        .desc("total num of chained read misses");
+
+    dramCache_chain_write_misses
+        .name(name() + ".dramCache_chain_write_misses")
+        .desc("total num of chained write misses");
+
+    dramCache_chain_cpu_hits
+        .name(name() + ".dramCache_chain_cpu_hits")
+        .desc("total num of chained cpu hits");
+
+    dramCache_chain_cpu_misses
+        .name(name() + ".dramCache_chain_cpu_misses")
+        .desc("total num of chained cpu misses");
+
+    dramCache_chain_gpu_hits
+        .name(name() + ".dramCache_chain_gpu_hits")
+        .desc("total num of chained gpu hits");
+
+    dramCache_chain_gpu_hits =
+            ( dramCache_chain_read_hits + dramCache_chain_write_hits )
+                - dramCache_chain_cpu_hits;
+
+    dramCache_chain_gpu_misses
+        .name(name() + ".dramCache_chain_gpu_misses")
+        .desc("total num of chained gpu misses");
+
+    dramCache_chain_gpu_misses =
+            ( dramCache_chain_read_misses + dramCache_chain_write_misses)
+                - dramCache_chain_cpu_misses;
+
+    dramCache_chain_cpu_read_hits
+        .name(name() + ".dramCache_chain_cpu_read_hits")
+        .desc("total num of chained cpu read hits");
+
+    dramCache_chain_cpu_read_misses
+        .name(name() + ".dramCache_chain_cpu_read_misses")
+        .desc("total num of chained cpu read misses");
+
+    dramCache_chain_cpu_write_hits
+        .name(name() + ".dramCache_chain_cpu_write_hits")
+        .desc("total num of chained cpu write hits");
+
+    dramCache_chain_cpu_write_misses
+        .name(name() + ".dramCache_chain_cpu_write_misses")
+        .desc("total num of chained cpu write misses");
+
+
+    dramCache_chain_unlink_cpu_eviction
+        .name(name() + ".dramCache_chain_unlink_cpu_eviction")
+        .desc("total number of chains broken by cpu eviction");
+
+    dramCache_chain_unlink_gpu_eviction
+        .name(name() + ".dramCache_chain_unlink_gpu_eviction")
+        .desc("total number of chains broken by gpu eviction");
+
+    dramCache_chain_unlink_chain
+        .name(name() + ".dramCache_chain_unlink_chain")
+        .desc("total number of chains broken by another chain");
+
+    dramCache_gpu_bypass
+        .name(name() + ".dramCache_gpu_bypass")
+        .desc("number of gpu requests bypassed due to no chain found");
+
 }
 
 BaseMasterPort &

@@ -18,6 +18,7 @@
 #include <set>
 #include <map>
 #include <vector>
+#include <algorithm>
 
 #include "base/statistics.hh"
 #include "enums/AddrMap.hh"
@@ -35,6 +36,10 @@
 #define DRAM_PKT_COUNT 2
 #define PREDICTION_LATENCY 5
 #define MAPI_PREDICTOR
+
+// maximum number of lookups to do to find an alternative line for eviction
+// our chain table has 2 bits; 0 no chain, [1-3] chain locations
+#define CHAIN_MAX 3
 
 class DRAMCacheCtrl : public DRAMCtrl
 {
@@ -144,6 +149,7 @@ class DRAMCacheCtrl : public DRAMCtrl
     uint64_t num_sub_blocks_per_way;
     uint64_t total_gpu_lines; // moving count of total lines owned by GPU
     uint64_t total_gpu_dirty_lines; // moving count of total dirty lines owned by GPU
+    uint64_t total_chained_sets;
     uint64_t order; // mshr needs order for some reason
     const int numTarget;
 
@@ -204,6 +210,56 @@ class DRAMCacheCtrl : public DRAMCtrl
     // static prediction accuracy we want our predictor to have
     static int predAccuracy;
 
+    // gpu occupancy threshold above which gpu req are chained
+    static int chainingThreshold;
+
+    // bypass tag store for CPU
+    class LRUTagStore
+    {
+        // fully associative victim tag store for DRAMCache
+        int size;
+        std::vector<Addr> tags;
+        DRAMCacheCtrl* dramcache;
+
+      public:
+        Stats::Scalar num_hits;
+        Stats::Scalar num_accesses;
+        Stats::Formula hit_rate;
+
+        LRUTagStore (DRAMCacheCtrl *dramache, int size)
+        {
+            this->size = size;
+            tags.reserve(size);
+            this->dramcache = dramcache;
+        }
+        void insertIntoBypassTag(PacketPtr pkt)
+        {
+            Addr blockAddr = dramcache->blockAlign(pkt->getAddr());
+            if (tags.size() == size)
+                tags.pop_back();
+            tags.insert(tags.begin(), blockAddr);
+
+        }
+        bool isHit(PacketPtr pkt)
+        {
+            Addr blockAddr = dramcache->blockAlign(pkt->getAddr());
+            auto it = std::find (tags.begin(), tags.end(), blockAddr);
+            if (it != tags.end())
+            {
+                tags.erase(it);
+                tags.insert(tags.begin(), blockAddr);
+                return true;
+            }
+            return false;
+        }
+        void regStats();
+
+    };
+
+    LRUTagStore *cpuBypassTag;
+    bool bypassTagEnable;
+
+
     Random randomPredictor;
 
     //since assoc is 1 - set = way
@@ -231,6 +287,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	    uint64_t tag;
 	    bool     valid;
 	    bool     dirty;
+	    bool     chainedDirty;
 	    // cache sub-block counters
 	    //bool     *used; // a bit per each cache block sized chunk in the line to denote usage
 	    //uint64_t *written; // counter for each cache block write count
@@ -240,6 +297,9 @@ class DRAMCacheCtrl : public DRAMCtrl
 	};
 
 	struct dramCacheSet_t * set;
+	std::vector<uint8_t> chainTable;
+	std::vector<uint8_t> reverseChainTable;
+	std::vector<bool> isRowChained;
 	std::vector<bool> isGPUOwned;
 	// counter for how often to sample max_gpu_lines
 	int max_gpu_lines_sample_counter;
@@ -265,7 +325,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_cpu_hits;   // hits for CPU req
 	Stats::Scalar dramCache_cpu_misses; // misses for CPU req
 	// histogram grouping of set numbers (1000 buckets) and number of times sets were occupied by GPU
-	Stats::Histogram dramCache_gpu_occupancy_per_set;
+	//Stats::Histogram dramCache_gpu_occupancy_per_set;
 
 	Stats::Scalar dramCache_mshr_hits;
 	Stats::Scalar dramCache_cpu_mshr_hits;
@@ -323,6 +383,83 @@ class DRAMCacheCtrl : public DRAMCtrl
     Stats::Scalar gpuWrQLat;
     Stats::Scalar gpuWrMemAccLat;
     Stats::Scalar gpuWrBusLat;
+
+    // CHAINING STATS
+    // total number of number of times set chaining was done
+    Stats::Scalar dramCache_total_chained_sets;
+    // max number of chained sets at any point in time in the cache
+    Stats::Scalar dramCache_max_chained_sets;
+    Stats::Scalar dramCache_avg_chained_sets;
+    // assuming chaining is done at row buffer granularity
+    Stats::Scalar dramCache_total_chained_rows;
+    Stats::Scalar dramCache_avg_chained_rows;
+    Stats::Scalar dramCache_max_chained_rows;
+
+    Stats::Scalar dramCache_chain_read_hits;
+    Stats::Scalar dramCache_chain_write_hits;
+    Stats::Scalar dramCache_chain_read_misses;
+    Stats::Scalar dramCache_chain_write_misses;
+    Stats::Scalar dramCache_chain_cpu_hits;
+    Stats::Scalar dramCache_chain_cpu_misses;
+    Stats::Formula dramCache_chain_gpu_hits;
+    Stats::Formula dramCache_chain_gpu_misses;
+    Stats::Scalar dramCache_chain_cpu_read_hits;
+    Stats::Scalar dramCache_chain_cpu_read_misses;
+    Stats::Scalar dramCache_chain_cpu_write_hits;
+    Stats::Scalar dramCache_chain_cpu_write_misses;
+
+    // chain_gpu_hits/misses can be derived as total_hits/miss - cpu_hits/miss
+    Stats::Scalar dramCache_chain_unlink_cpu_eviction;
+    Stats::Scalar dramCache_chain_unlink_gpu_eviction;
+    // a different set wanted to chain to this set, so it unlinked the previous chain set
+    // e.g. A->C; now B wants to chain to C; A->C unlink
+    Stats::Scalar dramCache_chain_unlink_chain;
+    // gpu bypass occurs when it can't find a GPU line in CHAIN_MAX lookaheads
+    Stats::Scalar dramCache_gpu_bypass;
+
+    // CHAINING HELPER FUNCTIONS
+    bool isChained(unsigned int cacheSet)
+    {
+        if(chainTable[cacheSet]==0)
+            return true;
+        return false;
+    }
+
+    bool isReverseChained(unsigned int cacheSet)
+    {
+        if(reverseChainTable[cacheSet]==0)
+            return true;
+        return false;
+    }
+
+    void unlinkChain(unsigned int cacheSet)
+    {
+        assert(chainTable[cacheSet]==0);
+        unsigned int chainedSet = cacheSet + chainTable[cacheSet];
+        // if the chainedSet and cacheSet donot lie in same row; then we have
+        // to wrap around e.g. 73+3=76; 76/15=5; 73/15=4
+        if((chainedSet/15) != (cacheSet/15))
+        {
+            chainedSet = ((floor(cacheSet/15))*15) + (chainedSet%15);
+        }
+        reverseChainTable[chainedSet]=0;
+        chainTable[cacheSet]=0;
+
+    }
+
+    void unlinkReverseChain(unsigned int cacheSet)
+    {
+        assert(reverseChainTable[cacheSet]==0);
+        unsigned int chainedSet = cacheSet - reverseChainTable[cacheSet];
+        // if the chainedSet and cacheSet donot lie in same row; then we have
+        // to wrap around e.g. 60-3=57; 57/15=3; 60/15=4
+        if((chainedSet/15) != (cacheSet/15))
+        {
+            chainedSet = ((floor(cacheSet/15))*15) + (chainedSet%15);
+        }
+        reverseChainTable[cacheSet]=0;
+        chainTable[chainedSet]=0;
+    }
 
     DRAMCacheCtrl(const DRAMCacheCtrlParams* p);
 
@@ -515,6 +652,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     void recvTimingResp(PacketPtr pkt);
 
+    void doChainedDRAMAccess(DRAMPacket* dram_pkt);
     void doDRAMAccess(DRAMPacket* dram_pkt);
 
     // predictor functions
