@@ -1210,11 +1210,12 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
+        uint64_t cacheRow = floor(addr/15);
 	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
 	// account for tags for each 15 sets (i.e each row)
-	addr += floor(addr/15) * 2;
+	addr += (cacheRow * 2);
 
     unsigned pktsServicedByWrQFillQ = 0;
     BurstHelper* burst_helper = NULL;
@@ -1380,11 +1381,12 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
     // ADARSH calcuating DRAM cache address here
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
+        uint64_t cacheRow = floor(addr/15);
 	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
 	// account for tags for each 15 sets (i.e each row)
-	addr += floor(addr/15) * 2;
+	addr += (cacheRow * 2);
 
 	BurstHelper* burst_helper = NULL;
 
@@ -1473,11 +1475,12 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 	// ADARSH calcuating DRAM cache address here
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
+        uint64_t cacheRow = floor(addr/15);
 	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
 	// account for tags for each 15 sets (i.e each row)
-	addr += floor(addr/15) * 2;
+	addr += (cacheRow* 2);
 
 	if (fillQueueFull(pktCount))
 	{
