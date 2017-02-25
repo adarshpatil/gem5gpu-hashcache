@@ -488,9 +488,12 @@ class DRAMCtrl : public AbstractMemory
         { }
 
         // copy constructor, only address is changed; used for chained access
+        // bankID and rankID are same, only addr is different
+        // we also set the requestAddr as original pkt might already be responded
         DRAMPacket(DRAMPacket* dram_pkt, Addr _addr)
             : entryTime(curTick()), readyTime(curTick()),
-              pkt(dram_pkt->pkt), isRead(dram_pkt->isRead), isFill(false),
+              pkt(dram_pkt->pkt), requestAddr(pkt->getAddr()),
+			  isRead(dram_pkt->isRead), isFill(false),
               contextId(dram_pkt->contextId), rank(dram_pkt->rank),
               bank(dram_pkt->bank), row(dram_pkt->row), bankId(dram_pkt->bankId),
               addr(_addr), size(dram_pkt->size), burstHelper(NULL),

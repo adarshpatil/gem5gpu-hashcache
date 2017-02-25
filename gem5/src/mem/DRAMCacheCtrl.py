@@ -38,9 +38,10 @@ class DRAMCacheCtrl(DRAMCtrl):
 
     prediction_accuracy = Param.Unsigned(95, "Required prediction accuracy")
 
-    # If GPU occupancy goes beyond chaining_threshold, gpu requests are chained
-    # minimum CPU share guranteed 100-chaining_threshold
-    chaining_threshold = Param.Percent(20, "gpu occupancy share above which gpu req are chained")
+    # If CPU occupancy goes below chaining_cpu_threshold,
+    # gpu requests are not allowed to replace cpu lines
+    # minimum CPU share guranteed chaining_cpu_threshold
+    chaining_cpu_threshold = Param.Percent(20, "cpu occupancy share below which gpu req are chained")
 
     # bypass tag store - fully assocative structure
     bypass_tag_enable = Param.Bool(True,"enable bypass tag store")
@@ -224,3 +225,5 @@ class HMC_2500_x32_Cache(DDR3_1600_x64_Cache):
     write_high_thresh_perc = 36
     write_low_thresh_perc = 18
     min_writes_per_switch = 10
+
+    bypass_tag_enable = False
