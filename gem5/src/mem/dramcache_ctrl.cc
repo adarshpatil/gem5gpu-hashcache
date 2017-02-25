@@ -212,11 +212,11 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 {
 	// doing DRAMCache hit miss eviction etc
 	// find the cache block, set id and tag
-	unsigned int cacheBlock = pkt->getAddr () / dramCache_block_size;
 	unsigned int cacheSet, cacheTag;
 	tie(cacheSet, cacheTag) = getSetTagFromAddr(pkt->getAddr());
-	DPRINTF(DRAMCache, "%s pktAddr:%d, blockid:%d set:%d tag:%d\n", __func__,
-			pkt->getAddr(), cacheBlock, cacheSet, cacheTag);
+	DPRINTF(DRAMCache, "%s pktAddr: %d, blockid: %d set: %d tag: %d\n",
+			 __func__, pkt->getAddr(), (pkt->getAddr()/dramCache_block_size),
+			 cacheSet, cacheTag);
 	assert(cacheSet >= 0);
 	assert(cacheSet < dramCache_num_sets);
 
@@ -491,11 +491,11 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 	// decode the address based on the address mapping scheme, with
 	// Ro, Ra, Co, Ba and Ch denoting row, rank, column, bank and
 	// channel, respectively
-	uint8_t rank;
-	uint8_t bank;
+	uint8_t rank=0;
+	uint8_t bank=0;
 	// use a 64-bit unsigned during the computations as the row is
 	// always the top bits, and check before creating the DRAMPacket
-	uint64_t row;
+	uint64_t row=0;
 
 	//	ADARSH here the address should be the address of a set
 	//	cuz DRAMCache is addressed by set
