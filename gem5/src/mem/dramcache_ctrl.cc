@@ -1500,13 +1500,9 @@ DRAMCacheCtrl::processChainRespondEvent()
 					MSHRQueue *mq = pr->mshr->queue;
 					bool wasFull = mq->isFull();
 					mq->deallocate(pr->mshr);
-					delete pr;
-					pamQueue.erase(pamQueueItr);
 					if (wasFull && !mq->isFull ())
 						clearBlocked ((BlockedCause) mq->index);
-
 				}
-
 			}
 			else
 			{
