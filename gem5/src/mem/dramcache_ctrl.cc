@@ -84,6 +84,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	randomPredictor.init(3594);
 
 	max_gpu_lines_sample_counter = 0;
+	inform("DRAMCache operating in CHAINING MODE");
 	inform("DRAMCache per controller capacity %d MB\n", deviceCapacity);
 	inform("DRAMCache scheduling policy %s\n", memSchedPolicy);
 	inform("DRAMCache readQLen %d writeQLen %d\n", readBufferSize, writeBufferSize);
@@ -298,7 +299,6 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				isGPUOwned[cacheSet] = false;
 				switched_to_cpu_line++;
 			}
-			dramCache_cpu_hits++;
 			if(pkt->req->contextId() != 0)
 				dramCache_noncpu0_cpu_hits++;
 		}
@@ -386,7 +386,6 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			DPRINTF(DRAMCache, "CPU request %d is a %s miss\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
 
-			dramCache_cpu_misses++;
 /*			if (set[cacheSet].valid)
 			{
 				dramCache_evicts++;
@@ -3314,9 +3313,13 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_cpu_hits")
 		.desc ("Number of hits for CPU Requests");
 
+	dramCache_cpu_hits = dramCache_cpu_read_hits + dramCache_cpu_write_hits;
+
 	dramCache_cpu_misses
 		.name (name () + ".dramCache_cpu_misses")
 		.desc ("Number of misses for CPU Requests");
+
+	dramCache_cpu_misses = dramCache_cpu_read_misses + dramCache_cpu_write_misses;
 
 	dramCache_mshr_hits
 		.name (name () + ".dramCache_mshr_hits")
