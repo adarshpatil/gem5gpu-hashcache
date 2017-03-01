@@ -6,6 +6,7 @@
  */
 
 #include "mem/dramcache_ctrl.hh"
+#include "src/gpu/gpgpu-sim/cuda_gpu.hh"
 #include "debug/DRAMCache.hh"
 #include "debug/Drain.hh"
 #include "mem/ruby/system/RubyPort.hh"
@@ -16,9 +17,16 @@
 using namespace std;
 using namespace Data;
 
+// these things are #defined in gpgpu-sim; since we include cuda_gpu for
+// CudaGPU::running flag, we need to undef these
+// #define WRITE 'W' -> gpgpu-sim/dram.h:39:15
+// #define READ 'R'  -> gpgpu-sim/dram.h:39:14
+#undef WRITE
+#undef READ
 
 map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
 int DRAMCacheCtrl::predAccuracy;
+bool DRAMCacheCtrl::switched_gpu_running;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
@@ -45,6 +53,13 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 			* ranksPerChannel;
 
 	DRAMCacheCtrl::predAccuracy = p->prediction_accuracy;
+
+	bypassTagEnable = p->bypass_tag_enable;
+	dirtyCleanBypassEnable = p->dirty_clean_bypass_enable;
+	if (bypassTagEnable)
+	{
+		bypassTag = new LRUTagStore(this, p->bypass_tag_size);
+	}
 
 	rowsPerBank = (1024 * 1024 * deviceCapacity)
             / (rowBufferSize * banksPerRank * ranksPerChannel);
@@ -76,6 +91,8 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	// we initalize a static seed for our randomPredictor
 	randomPredictor.init(3594);
 
+	switched_gpu_running = false;
+
 	max_gpu_lines_sample_counter = 0;
 	inform("DRAMCache per controller capacity %d MB\n", deviceCapacity);
 	inform("DRAMCache scheduling policy %s\n", memSchedPolicy);
@@ -84,6 +101,9 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 			writeLowThreshold, writeHighThreshold);
 	inform("DRAMCache address mapping %d, page mgmt %d", addrMapping, pageMgmt);
 	inform("DRAMCache mshrs %d, writebuffers %d", p->mshrs , p->write_buffers);
+	inform("DRAMCache Bypass tag enabled %d bypass tag size %d",
+			bypassTagEnable, p->bypass_tag_size);
+	inform("DRAMCache Dirty/Clean bypass enabled %d", dirtyCleanBypassEnable);
 }
 
 void
@@ -375,6 +395,11 @@ DRAMCacheCtrl::doWriteBack(Addr evictAddr, int contextId)
 	delete dummyRdPkt;
 
 	allocateWriteBuffer(wbPkt,curTick()+1);
+
+	unsigned int cacheBlock = evictAddr/dramCache_block_size;
+	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+	set[cacheSet].valid = false;
+	set[cacheSet].dirty = false;
 
 }
 
@@ -996,24 +1021,6 @@ DRAMCacheCtrl::processRespondEvent ()
 
 						// put the data into dramcache
 						// fill the dramcache and update tags
-						unsigned int cacheBlock = dram_pkt->pkt->getAddr()/dramCache_block_size;
-						unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-						unsigned int cacheTag = cacheBlock / dramCache_num_sets;
-
-						Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-						DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d dirty %d\n",
-								__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
-
-						// this block needs to be evicted
-						if (set[cacheSet].dirty)
-							doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
-
-						// change the tag directory
-						set[cacheSet].tag = cacheTag;
-						set[cacheSet].dirty = false;
-						set[cacheSet].valid = true;
-						isGPUOwned[cacheSet] =
-								dram_pkt->pkt->req->contextId() == 31 ? true:false;
 
 						// add to fillQueue since we encountered a miss
 						// create a packet and add to fillQueue
@@ -1215,7 +1222,7 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
-        uint64_t cacheRow = floor(addr/15);
+    uint64_t cacheRow = floor(addr/15);
 	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
@@ -1481,10 +1488,37 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 
 	Addr addr = pkt->getAddr();
 
+	// update tags
+	unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
+	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+
+	Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
+	DPRINTF(DRAMCache, "%s PAM Evicting addr %d in cacheSet %d dirty %d\n",
+			__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
+
+	// this block needs to be evicted
+	if (set[cacheSet].dirty && set[cacheSet].valid)
+		doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
+
+	// change the tag directory
+	set[cacheSet].tag = cacheTag;
+	set[cacheSet].dirty = false;
+	set[cacheSet].valid = true;
+	isGPUOwned[cacheSet] =
+			pkt->req->contextId() == 31 ? true:false;
+
+	// remove from bypass tag when we fill into DRAMCache
+	if (bypassTagEnable)
+	{
+		bypassTag->removeFromBypassTag(pkt->getAddr());
+		bypassTag->insertIntoBypassTag(evictAddr);
+	}
+
 	// ADARSH calcuating DRAM cache address here
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
-        uint64_t cacheRow = floor(addr/15);
+    uint64_t cacheRow = floor(addr/15);
 	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
@@ -1649,6 +1683,52 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		return true;
 	}
 
+	if (bypassTagEnable)
+	{
+		if (bypassTag->isHit(pkt->getAddr()))
+		{
+			if (pkt->isRead())
+			{
+				DPRINTF(DRAMCache,"Read bypass addr %d\n", pkt->getAddr());
+				bypassTag->num_read_hits++;
+				if (pkt->req->contextId()!=31)
+					bypassTag->num_cpu_read_hits++;
+				allocateMissBuffer(pkt, curTick()+PREDICTION_LATENCY, true);
+			}
+			else
+			{
+				DPRINTF(DRAMCache,"Write bypass addr %d\n", pkt->getAddr());
+				bypassTag->num_write_hits++;
+				if (pkt->req->contextId()!=31)
+					bypassTag->num_cpu_write_hits++;
+				access(pkt);
+				RequestPtr req = new Request(pkt->getAddr(),
+						dramCache_block_size, 0, Request::wbMasterId);
+				req->setContextId(pkt->req->contextId());
+				PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
+				clone_pkt->allocate();
+				allocateWriteBuffer(clone_pkt,curTick()+PREDICTION_LATENCY);
+				respond(pkt, frontendLatency);
+			}
+			return true;
+		}
+		else
+		{
+			if (pkt->isRead())
+			{
+				bypassTag->num_read_misses++;
+				if (pkt->req->contextId()!=31)
+					bypassTag->num_cpu_read_misses++;
+			}
+			else
+			{
+				bypassTag->num_write_misses++;
+				if (pkt->req->contextId()!=31)
+					bypassTag->num_cpu_write_misses++;
+			}
+		}
+	}
+
 #ifdef PASS_PC
 	// perform prediction using cache address; lookup RubyPort::predictorTable
 	int cid = pkt->req->contextId();
@@ -1671,9 +1751,43 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// UPDATE we modified this to 2 bursts including tag since we assume the
 	// tags also burst out using an odd burst size of slightly greater than 64B
 
+	// if GPU state changed
+	if(switched_gpu_running != CudaGPU::running)
+	{
+		if(CudaGPU::running && dirtyCleanBypassEnable)
+		{
+			inform("GPU started, dirty/clean bypass for CPU req started");
+		}
+		else
+		{
+			inform("GPU stopped, dirty/clean bypass for CPU req stopped");
+		}
+	}
+
+	// track GPU running state
+	switched_gpu_running = CudaGPU::running;
+
 	// check local buffers and do not accept if full
 	if (pkt->isRead ())
 	{
+		unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
+		unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+		unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+		// CPU request and GPU is running and dirtyCleanBypass is enabled
+		// and the set is clean then bypass
+		if (pkt->req->contextId() != 31 && CudaGPU::running &&
+				dirtyCleanBypassEnable)
+		{
+			if (!set[cacheSet].dirty)
+			{
+				allocateMissBuffer(pkt, PREDICTION_LATENCY, true);
+				dramCache_dirty_clean_bypass++;
+				return true;
+			}
+			else if (cacheTag!=set[cacheSet].tag)
+				dramCache_dirty_clean_bypass_miss++;
+		}
+
 		assert(size != 0);
 		if (readQueueFull (DRAM_PKT_COUNT))
 		{
@@ -1832,26 +1946,6 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			if (wasFull && !mq->isFull())
 				clearBlocked ((BlockedCause) mq->index);
 
-			// update tags
-			unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
-			unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-			unsigned int cacheTag = cacheBlock / dramCache_num_sets;
-
-			Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-			DPRINTF(DRAMCache, "%s PAM Evicting addr %d in cacheSet %d dirty %d\n",
-					__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
-
-			// this block needs to be evicted
-			if (set[cacheSet].dirty)
-				doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
-
-			// change the tag directory
-			set[cacheSet].tag = cacheTag;
-			set[cacheSet].dirty = false;
-			set[cacheSet].valid = true;
-			isGPUOwned[cacheSet] =
-					pkt->req->contextId() == 31 ? true:false;
-
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
@@ -1896,10 +1990,6 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		if (!set[cacheSet].valid)
 		{
 			// cold miss - the set was not valid
-			set[cacheSet].tag = cacheTag;
-			set[cacheSet].dirty = false;
-			set[cacheSet].valid = true;
-			isGPUOwned[cacheSet] = pkt->req->contextId() == 31 ? true:false;
 
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue
@@ -1919,19 +2009,6 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		}
 		else if (set[cacheSet].tag != cacheTag)
 		{
-			Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-			DPRINTF(DRAMCache, "%s Evicting addr %d in cacheSet %d dirty %d\n",
-					__func__,evictAddr ,cacheSet, set[cacheSet].dirty);
-			// this block needs to be evicted
-			if (set[cacheSet].dirty)
-				doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
-
-			// change the tag directory
-			set[cacheSet].tag = cacheTag;
-			set[cacheSet].dirty = false;
-			set[cacheSet].valid = true;
-			isGPUOwned[cacheSet] = pkt->req->contextId() == 31 ? true:false;
-
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
@@ -2256,11 +2333,60 @@ DRAMCacheCtrl::drain()
     }
 }
 
+
+void
+DRAMCacheCtrl::LRUTagStore::regStats(string name)
+{
+	using namespace Stats;
+
+	num_read_hits
+        .name (name + ".bypasstag_read_hits")
+        .desc ("num of read hits in tag store");
+
+    num_read_misses
+        .name (name + ".bypasstag_read_misses")
+        .desc ("num of read misses in tag store");
+
+    num_cpu_read_hits
+        .name (name + ".bypasstag_cpu_read_hits")
+        .desc ("num of cpu read hits in tag store");
+
+    num_cpu_read_misses
+        .name (name + ".bypasstag_cpu_read_misses")
+        .desc ("num of cpu read misses in tag store");
+
+    num_cpu_write_hits
+        .name (name + ".bypasstag_cpu_write_hits")
+        .desc ("num of cpu write hits in tag store");
+
+    num_cpu_write_misses
+        .name (name + ".bypasstag_cpu_write_misses")
+        .desc ("num of cpu read misses in tag store");
+
+    hit_rate
+        .name (name + ".bypasstag_hit_rate")
+        .desc ("hit rate of the tag store");
+
+    hit_rate = (num_read_hits + num_write_hits) /
+            (num_read_hits + num_write_hits + num_read_misses + num_write_misses);
+
+    cpu_hit_rate
+        .name (name + ".bypasstag_cpu_hit_rate")
+        .desc ("cpu hit rate of the tag store");
+
+    cpu_hit_rate = (num_cpu_read_hits + num_cpu_write_hits) /
+            (num_cpu_read_hits + num_cpu_write_hits +
+                    num_cpu_read_misses + num_cpu_write_misses);
+
+}
+
 void
 DRAMCacheCtrl::regStats ()
 {
 	using namespace Stats;
 	DRAMCtrl::regStats ();
+	if (bypassTagEnable)
+		bypassTag->regStats(name());
 
 	dramCache_read_hits
 		.name (name () + ".dramCache_read_hits")
@@ -2574,6 +2700,14 @@ DRAMCacheCtrl::regStats ()
     gpuWrBusLat
         .name(name() + ".gpuWrBusLat")
         .desc("ticks spent in databus transfers for GPU Requests for writes");
+
+    dramCache_dirty_clean_bypass
+	    .name(name() + ".dramCache_dirty_clean_bypass")
+        .desc("num times dirty clean mechanism did a bypass");
+
+    dramCache_dirty_clean_bypass_miss
+	    .name(name() + ".dramCache_dirty_clean_bypass_miss")
+        .desc("num of times read miss to a dirty line");
 }
 
 BaseMasterPort &

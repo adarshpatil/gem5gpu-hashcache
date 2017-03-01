@@ -18,6 +18,7 @@
 #include <set>
 #include <map>
 #include <vector>
+#include <vector>
 #include <fstream>
 
 #include "base/statistics.hh"
@@ -37,7 +38,7 @@
 #define DRAM_PKT_COUNT 2
 #define PREDICTION_LATENCY 5
 #define MAPI_PREDICTOR
-#define MEM_TRACE_DUMP
+#undef MEM_TRACE_DUMP
 
 class DRAMCacheCtrl : public DRAMCtrl
 {
@@ -206,6 +207,75 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     // static prediction accuracy we want our predictor to have
     static int predAccuracy;
+
+    // bypass tag store for CPU
+    class LRUTagStore
+    {
+        // fully associative victim tag store for DRAMCache
+        int size;
+        std::vector<Addr> tags;
+        DRAMCacheCtrl* dramcache;
+
+      public:
+        Stats::Scalar num_read_hits;
+        Stats::Scalar num_read_misses;
+        Stats::Scalar num_write_hits;
+        Stats::Scalar num_write_misses;
+        Stats::Scalar num_cpu_read_hits;
+        Stats::Scalar num_cpu_read_misses;
+        Stats::Scalar num_cpu_write_hits;
+        Stats::Scalar num_cpu_write_misses;
+        Stats::Formula hit_rate;
+        Stats::Formula cpu_hit_rate;
+
+        LRUTagStore (DRAMCacheCtrl *dramache, int size)
+        {
+            this->size = size;
+            tags.reserve(size);
+            this->dramcache = dramcache;
+        }
+        void insertIntoBypassTag(Addr addr)
+        {
+            Addr blockAddr = dramcache->blockAlign(addr);
+            if (tags.size() == size)
+                tags.pop_back();
+            tags.insert(tags.begin(), blockAddr);
+
+        }
+        bool isHit(Addr addr)
+        {
+            Addr blockAddr = dramcache->blockAlign(addr);
+            auto it = std::find (tags.begin(), tags.end(), blockAddr);
+            if (it != tags.end())
+            {
+                tags.erase(it);
+                tags.insert(tags.begin(), blockAddr);
+                return true;
+            }
+            return false;
+        }
+        bool removeFromBypassTag(Addr addr)
+        {
+            Addr blockAddr = dramcache->blockAlign(addr);
+            auto it = std::find (tags.begin(), tags.end(), blockAddr);
+            if (it != tags.end())
+            {
+                tags.erase(it);
+                return true;
+            }
+            return false;
+        }
+        void regStats(std::string name);
+
+    };
+
+    LRUTagStore *bypassTag;
+    bool bypassTagEnable;
+    bool dirtyCleanBypassEnable;
+    static bool switched_gpu_running;
+
+    Stats::Scalar dramCache_dirty_clean_bypass;
+    Stats::Scalar dramCache_dirty_clean_bypass_miss;
 
     Random randomPredictor;
 

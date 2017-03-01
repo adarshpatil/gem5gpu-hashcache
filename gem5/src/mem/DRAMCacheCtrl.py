@@ -38,6 +38,12 @@ class DRAMCacheCtrl(DRAMCtrl):
 
     prediction_accuracy = Param.Unsigned(95, "Required prediction accuracy")
 
+    # bypass tag store - fully assocative structure
+    bypass_tag_enable = Param.Bool(True,"enable bypass tag store")
+    bypass_tag_size = Param.Unsigned(64,"Number of entires in the bypass tag store")
+
+    dirty_clean_bypass_enable = Param.Bool(True,"Bypass based on dirty clean status of set")
+
 # A single DDR3-1600 x64 channel (one command and address bus), with
 # timings based on a DDR3-1600 4 Gbit datasheet (Micron MT41J512M8) in
 # an 8x8 configuration.
