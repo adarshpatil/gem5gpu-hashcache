@@ -90,6 +90,9 @@ void
 DRAMCacheCtrl::init ()
 {
 	DRAMCtrl::init ();
+#ifdef MEM_TRACE_DUMP
+        traceInit();
+#endif
 	set = new dramCacheSet_t[dramCache_num_sets];
 	DPRINTF(DRAMCache, "dramCache_num_sets: %d\n", dramCache_num_sets);
 
@@ -1206,6 +1209,10 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
     // check read packets against packets in write queue.
     Addr addr = pkt->getAddr();
 
+#ifdef MEM_TRACE_DUMP
+    writeTrace(pkt->req->contextId()==31?true:false, true, addr);
+#endif
+
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
         uint64_t cacheRow = floor(addr/15);
@@ -1375,6 +1382,10 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
     // if the request size is larger than burst size, the pkt is split into
     // multiple DRAM packets
     Addr addr = pkt->getAddr();
+
+#ifdef MEM_TRACE_DUMP
+    writeTrace(pkt->req->contextId()==31?true:false, false, addr);
+#endif
 
     // ADARSH calcuating DRAM cache address here
 	addr = addr / dramCache_block_size;

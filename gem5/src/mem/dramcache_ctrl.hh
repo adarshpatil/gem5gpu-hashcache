@@ -18,6 +18,7 @@
 #include <set>
 #include <map>
 #include <vector>
+#include <fstream>
 
 #include "base/statistics.hh"
 #include "enums/AddrMap.hh"
@@ -31,10 +32,12 @@
 #include "mem/cache/mshr_queue.hh"
 #include "debug/DRAMCache.hh"
 #include "base/random.hh"
+#include "base/callback.hh"
 
 #define DRAM_PKT_COUNT 2
 #define PREDICTION_LATENCY 5
 #define MAPI_PREDICTOR
+#define MEM_TRACE_DUMP
 
 class DRAMCacheCtrl : public DRAMCtrl
 {
@@ -344,9 +347,54 @@ class DRAMCacheCtrl : public DRAMCtrl
             delete [] set;
         }
         set=NULL;
+        inform("destructor dramcache");
+#ifdef MEM_TRACE_DUMP
+        mem_trace.close();
+#endif
     }
 
     void init() M5_ATTR_OVERRIDE;
+
+#ifdef MEM_TRACE_DUMP
+    // trace is done for reads(0) and writes(1)
+    // after MSHR coalescing, write buffer hits
+    // but before read checks in Write/Fill Queue
+    // TRACE RECORD (isGPU,isRead,Addr)
+    std::ofstream mem_trace;
+    struct trace
+    {
+        bool isGPU;
+        bool isRead;
+        uint64_t addr;
+        trace(bool isGPU, bool isRead, uint64_t addr) :
+                isGPU(isGPU), isRead(isRead), addr(addr)
+        {
+        }
+    };
+    void traceInit()
+    {
+        mem_trace.open("mem_trace.bin",std::ofstream::out|std::ofstream::binary);
+        if (mem_trace == NULL)
+        {
+           fatal("Could not open trace file: mem_trace.bin. No trace on!");
+        }
+        inform("Started memory access tracing into file: mem_trace.bin");
+        // Register a callback to compensate for the destructor not
+        // being called. The callback forces the stream to flush and
+        // closes the output file.
+        registerExitCallback(
+            new MakeCallback<DRAMCacheCtrl, &DRAMCacheCtrl::closeMemTraceStream>(this));
+    }
+    void writeTrace(bool isGPU, bool isRead, Addr addr)
+    {
+        struct trace rec(isGPU, isRead, blockAlign(addr));
+        mem_trace.write((char*)&rec, sizeof(rec));
+    }
+    void closeMemTraceStream()
+    {
+        mem_trace.close();
+    }
+#endif
 
     DrainState drain() M5_ATTR_OVERRIDE;
 
