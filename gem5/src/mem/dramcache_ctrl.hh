@@ -452,7 +452,8 @@ class DRAMCacheCtrl : public DRAMCtrl
     };
     void traceInit()
     {
-        mem_trace.open("mem_trace.bin",std::ofstream::out|std::ofstream::binary);
+        std::string filename = name() + "_mem_trace.bin";
+        mem_trace.open(filename.c_str(),std::ofstream::out|std::ofstream::binary);
         if (mem_trace == NULL)
         {
            fatal("Could not open trace file: mem_trace.bin. No trace on!");
