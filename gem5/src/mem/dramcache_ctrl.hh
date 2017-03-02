@@ -228,7 +228,7 @@ class DRAMCacheCtrl : public DRAMCtrl
         Stats::Formula hit_rate;
         Stats::Formula cpu_hit_rate;
 
-        LRUTagStore (DRAMCacheCtrl *dramache, int size)
+        LRUTagStore (DRAMCacheCtrl *dramcache, int size)
         {
             this->size = size;
             tags.reserve(size);
@@ -265,7 +265,7 @@ class DRAMCacheCtrl : public DRAMCtrl
             }
             return false;
         }
-        void regStats(std::string name);
+        void regStats();
 
     };
 
@@ -404,6 +404,15 @@ class DRAMCacheCtrl : public DRAMCtrl
     Stats::Scalar gpuWrQLat;
     Stats::Scalar gpuWrMemAccLat;
     Stats::Scalar gpuWrBusLat;
+
+    std::pair<unsigned int, unsigned int> getSetTagFromAddr(Addr addr)
+    {
+		unsigned int cacheBlock = addr/dramCache_block_size;
+		unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+		unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+
+		return std::make_pair(cacheSet, cacheTag);
+    }
 
     DRAMCacheCtrl(const DRAMCacheCtrlParams* p);
 

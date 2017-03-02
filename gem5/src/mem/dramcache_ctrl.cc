@@ -13,6 +13,7 @@
 #include "sim/system.hh"
 
 #include <algorithm>
+#include <tuple>
 
 using namespace std;
 using namespace Data;
@@ -148,13 +149,12 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 {
 	// doing DRAMCache hit miss eviction etc
 	// find the cache block, set id and tag
-	unsigned int cacheBlock = pkt->getAddr () / dramCache_block_size;
-	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+	unsigned int cacheSet, cacheTag;
+	tie(cacheSet, cacheTag) = getSetTagFromAddr(pkt->getAddr());
 	unsigned int cacheRow = cacheSet / 15;
 	dramCache_accesses_per_row[cacheRow]++;
 	DPRINTF(DRAMCache, "%s pktAddr:%d, blockid:%d set:%d tag:%d\n", __func__,
-			pkt->getAddr(), cacheBlock, cacheSet, cacheTag);
+			pkt->getAddr(), pkt->getAddr()/dramCache_block_size, cacheSet, cacheTag);
 	assert(cacheSet >= 0);
 	assert(cacheSet < dramCache_num_sets);
 
@@ -396,8 +396,8 @@ DRAMCacheCtrl::doWriteBack(Addr evictAddr, int contextId)
 
 	allocateWriteBuffer(wbPkt,curTick()+1);
 
-	unsigned int cacheBlock = evictAddr/dramCache_block_size;
-	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
+	unsigned int cacheSet, cacheTag;
+	tie(cacheSet, cacheTag) = getSetTagFromAddr(evictAddr);
 	set[cacheSet].valid = false;
 	set[cacheSet].dirty = false;
 
@@ -832,11 +832,13 @@ DRAMCacheCtrl::processWriteRespondEvent()
 				//     put entry for this line into writeBuffer
 				if (dramCache_write_allocate)
 				{
+					// we need to fix write allocate policy code
+					// addtoFillQ etc
+					warn("write allocate policy might not be fully supported");
 					DPRINTF(DRAMCache, "write miss, write allocate\n");
 					// check conflicting line for clean or dirty
-					unsigned int cacheBlock = dram_pkt->pkt->getAddr()/dramCache_block_size;
-					unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-					unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+					unsigned int cacheSet, cacheTag;
+					tie(cacheSet, cacheTag) = getSetTagFromAddr(dram_pkt->pkt->getAddr());
 
 					if (set[cacheSet].dirty)
 					{
@@ -1489,9 +1491,8 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 	Addr addr = pkt->getAddr();
 
 	// update tags
-	unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
-	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+	unsigned int cacheSet, cacheTag;
+	tie(cacheSet, cacheTag) = getSetTagFromAddr(pkt->getAddr());
 
 	Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
 	DPRINTF(DRAMCache, "%s PAM Evicting addr %d in cacheSet %d dirty %d\n",
@@ -1770,9 +1771,8 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// check local buffers and do not accept if full
 	if (pkt->isRead ())
 	{
-		unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
-		unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-		unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+		unsigned int cacheSet, cacheTag;
+		tie(cacheSet, cacheTag) = getSetTagFromAddr(pkt->getAddr());
 		// CPU request and GPU is running and dirtyCleanBypass is enabled
 		// and the set is clean then bypass
 		if (pkt->req->contextId() != 31 && CudaGPU::running &&
@@ -1983,9 +1983,8 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		MSHR::Target *initial_tgt = mshr->getTarget ();
 		// find the cache block, set id and tag
 		// fix the tag entry now that memory access has returned
-		unsigned int cacheBlock = pkt->getAddr()/dramCache_block_size;
-		unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-		unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+		unsigned int cacheSet, cacheTag;
+		tie(cacheSet, cacheTag) = getSetTagFromAddr(pkt->getAddr());
 
 		if (!set[cacheSet].valid)
 		{
@@ -2335,43 +2334,43 @@ DRAMCacheCtrl::drain()
 
 
 void
-DRAMCacheCtrl::LRUTagStore::regStats(string name)
+DRAMCacheCtrl::LRUTagStore::regStats()
 {
 	using namespace Stats;
 
 	num_read_hits
-        .name (name + ".bypasstag_read_hits")
+        .name (dramcache->name ()+ ".bypasstag_read_hits")
         .desc ("num of read hits in tag store");
 
     num_read_misses
-        .name (name + ".bypasstag_read_misses")
+        .name (dramcache->name () + ".bypasstag_read_misses")
         .desc ("num of read misses in tag store");
 
     num_cpu_read_hits
-        .name (name + ".bypasstag_cpu_read_hits")
+        .name (dramcache->name () + ".bypasstag_cpu_read_hits")
         .desc ("num of cpu read hits in tag store");
 
     num_cpu_read_misses
-        .name (name + ".bypasstag_cpu_read_misses")
+        .name (dramcache->name () + ".bypasstag_cpu_read_misses")
         .desc ("num of cpu read misses in tag store");
 
     num_cpu_write_hits
-        .name (name + ".bypasstag_cpu_write_hits")
+        .name (dramcache->name () + ".bypasstag_cpu_write_hits")
         .desc ("num of cpu write hits in tag store");
 
     num_cpu_write_misses
-        .name (name + ".bypasstag_cpu_write_misses")
+        .name (dramcache->name () + ".bypasstag_cpu_write_misses")
         .desc ("num of cpu read misses in tag store");
 
     hit_rate
-        .name (name + ".bypasstag_hit_rate")
+        .name (dramcache->name () + ".bypasstag_hit_rate")
         .desc ("hit rate of the tag store");
 
     hit_rate = (num_read_hits + num_write_hits) /
             (num_read_hits + num_write_hits + num_read_misses + num_write_misses);
 
     cpu_hit_rate
-        .name (name + ".bypasstag_cpu_hit_rate")
+        .name (dramcache->name () + ".bypasstag_cpu_hit_rate")
         .desc ("cpu hit rate of the tag store");
 
     cpu_hit_rate = (num_cpu_read_hits + num_cpu_write_hits) /
@@ -2386,7 +2385,7 @@ DRAMCacheCtrl::regStats ()
 	using namespace Stats;
 	DRAMCtrl::regStats ();
 	if (bypassTagEnable)
-		bypassTag->regStats(name());
+		bypassTag->regStats();
 
 	dramCache_read_hits
 		.name (name () + ".dramCache_read_hits")
@@ -2892,9 +2891,9 @@ bool
 DRAMCacheCtrl::predict_static(Addr blk_addr)
 {
 	dramCache_total_pred++;
-	unsigned int cacheBlock = blk_addr / dramCache_block_size;
-	unsigned int cacheSet = cacheBlock % dramCache_num_sets;
-	unsigned int cacheTag = cacheBlock / dramCache_num_sets;
+	unsigned int cacheSet, cacheTag;
+	tie(cacheSet, cacheTag) = getSetTagFromAddr(blk_addr);
+
 	bool pred;
 	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)
 	{
