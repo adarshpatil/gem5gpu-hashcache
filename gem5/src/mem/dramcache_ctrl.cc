@@ -1755,19 +1755,20 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// if GPU state changed
 	if(switched_gpu_running != CudaGPU::running)
 	{
-		if(CudaGPU::running && dirtyCleanBypassEnable)
-		{
-			inform("GPU started, dirty/clean bypass for CPU req started");
 #ifdef MEM_TRACE_DUMP
-			writeTrace(1,1,UINT64_MAX);
+		writeTrace(1,1,UINT64_MAX);
 #endif
+		if(CudaGPU::running)
+		{
+			inform("GPU started");
+			if (dirtyCleanBypassEnable)
+				inform("dirty/clean bypass for CPU req started");
 		}
 		else
 		{
-			inform("GPU stopped, dirty/clean bypass for CPU req stopped");
-#ifdef MEM_TRACE_DUMP
-			writeTrace(1,1,UINT64_MAX);
-#endif
+			inform("GPU stopped");
+			if(dirtyCleanBypassEnable)
+				inform("dirty/clean bypass for CPU req stopped");
 		}
 	}
 
