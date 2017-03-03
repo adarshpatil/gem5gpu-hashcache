@@ -1758,10 +1758,12 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		if(CudaGPU::running && dirtyCleanBypassEnable)
 		{
 			inform("GPU started, dirty/clean bypass for CPU req started");
+			writeTrace(1,1,UINT64_MAX);
 		}
 		else
 		{
 			inform("GPU stopped, dirty/clean bypass for CPU req stopped");
+			writeTrace(1,1,UINT64_MAX);
 		}
 	}
 
