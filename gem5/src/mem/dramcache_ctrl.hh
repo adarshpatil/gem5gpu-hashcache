@@ -265,8 +265,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_gpu_replaced_gpu;
 	Stats::Scalar switched_to_gpu_line; // CPU lines that became GPU lines in cache
 	Stats::Scalar switched_to_cpu_line; // GPU lines that became CPU lines in cache
-	Stats::Scalar dramCache_cpu_hits;   // hits for CPU req
-	Stats::Scalar dramCache_cpu_misses; // misses for CPU req
+	Stats::Formula dramCache_cpu_hits;   // hits for CPU req
+	Stats::Formula dramCache_cpu_misses; // misses for CPU req
 	// histogram grouping of set numbers (1000 buckets) and number of times sets were occupied by GPU
 	Stats::Histogram dramCache_gpu_occupancy_per_set;
 
@@ -335,7 +335,7 @@ class DRAMCacheCtrl : public DRAMCtrl
     Stats::Scalar cpuFootprint;
     Stats::Scalar gpuFootprint;
 
-    static bool switched_gpu_running;
+    bool switched_gpu_running;
 
     DRAMCacheCtrl(const DRAMCacheCtrlParams* p);
 
