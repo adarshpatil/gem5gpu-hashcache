@@ -1696,7 +1696,11 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 				DPRINTF(DRAMCache,"Read bypass addr %d\n", pkt->getAddr());
 				bypassTag->num_read_hits++;
 				if (pkt->req->contextId()!=31)
+				{
 					bypassTag->num_cpu_read_hits++;
+					if (CudaGPU::running)
+						bypassTag->num_cpu_read_hits_gpu_running++;
+				}
 				allocateMissBuffer(pkt, curTick()+PREDICTION_LATENCY, true);
 			}
 			else
@@ -1704,7 +1708,11 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 				DPRINTF(DRAMCache,"Write bypass addr %d\n", pkt->getAddr());
 				bypassTag->num_write_hits++;
 				if (pkt->req->contextId()!=31)
+				{
 					bypassTag->num_cpu_write_hits++;
+					if (CudaGPU::running)
+						bypassTag->num_cpu_write_hits_gpu_running++;
+				}
 				access(pkt);
 				RequestPtr req = new Request(pkt->getAddr(),
 						dramCache_block_size, 0, Request::wbMasterId);
@@ -1722,13 +1730,22 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 			{
 				bypassTag->num_read_misses++;
 				if (pkt->req->contextId()!=31)
+				{
 					bypassTag->num_cpu_read_misses++;
+					if (CudaGPU::running)
+						bypassTag->num_cpu_read_misses_gpu_running++;
+				}
+
 			}
 			else
 			{
 				bypassTag->num_write_misses++;
 				if (pkt->req->contextId()!=31)
+				{
 					bypassTag->num_cpu_write_misses++;
+					if (CudaGPU::running)
+						bypassTag->num_cpu_write_misses_gpu_running++;
+				}
 			}
 		}
 	}
@@ -2372,6 +2389,22 @@ DRAMCacheCtrl::LRUTagStore::regStats()
         .name (dramcache->name () + ".bypasstag_cpu_write_misses")
         .desc ("num of cpu read misses in tag store");
 
+    num_cpu_read_hits_gpu_running
+		.name (dramcache->name () + ".bypasstag_cpu_read_hits_gpu_running")
+		.desc ("num of cpu read hits when gpu is running");
+
+    num_cpu_read_misses_gpu_running
+		.name (dramcache->name () + ".bypasstag_cpu_read_misses_gpu_running")
+		.desc ("num of cpu read misses when gpu is running");
+
+    num_cpu_write_hits_gpu_running
+		.name (dramcache->name () + ".bypasstag_cpu_write_hits_gpu_running")
+		.desc ("num of cpu write hits when gpu is running");
+
+    num_cpu_write_misses_gpu_running
+		.name (dramcache->name () + ".bypasstag_cpu_write_misses_gpu_running")
+		.desc ("num of cpu write misses when gpu is running");
+
     hit_rate
         .name (dramcache->name () + ".bypasstag_hit_rate")
         .desc ("hit rate of the tag store");
@@ -2386,6 +2419,15 @@ DRAMCacheCtrl::LRUTagStore::regStats()
     cpu_hit_rate = (num_cpu_read_hits + num_cpu_write_hits) /
             (num_cpu_read_hits + num_cpu_write_hits +
                     num_cpu_read_misses + num_cpu_write_misses);
+
+    cpu_hit_rate_gpu_running
+		.name (dramcache-> name () + ".bypasstag_cpu_hit_rate_gpu_running")
+		.desc ("cpu hit rate when the gpu was running");
+
+    cpu_hit_rate_gpu_running =
+            (num_cpu_read_hits_gpu_running + num_cpu_write_hits_gpu_running) /
+            (num_cpu_read_hits_gpu_running + num_cpu_write_hits_gpu_running +
+                    num_cpu_read_misses_gpu_running + num_cpu_write_misses_gpu_running);
 
 }
 

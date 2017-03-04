@@ -225,7 +225,13 @@ class DRAMCacheCtrl : public DRAMCtrl
         Stats::Scalar num_cpu_read_misses;
         Stats::Scalar num_cpu_write_hits;
         Stats::Scalar num_cpu_write_misses;
+        Stats::Scalar num_cpu_read_hits_gpu_running;
+        Stats::Scalar num_cpu_read_misses_gpu_running;
+        Stats::Scalar num_cpu_write_hits_gpu_running;
+        Stats::Scalar num_cpu_write_misses_gpu_running;
+
         Stats::Formula hit_rate;
+        Stats::Formula cpu_hit_rate_gpu_running;
         Stats::Formula cpu_hit_rate;
 
         LRUTagStore (DRAMCacheCtrl *dramcache, int size)
