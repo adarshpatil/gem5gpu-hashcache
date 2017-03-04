@@ -272,7 +272,7 @@ class DRAMCacheCtrl : public DRAMCtrl
     LRUTagStore *bypassTag;
     bool bypassTagEnable;
     bool dirtyCleanBypassEnable;
-    static bool switched_gpu_running;
+    bool switched_gpu_running;
 
     Stats::Scalar dramCache_dirty_clean_bypass;
     Stats::Scalar dramCache_dirty_clean_bypass_miss;

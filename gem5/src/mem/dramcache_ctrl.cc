@@ -27,7 +27,6 @@ using namespace Data;
 
 map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
 int DRAMCacheCtrl::predAccuracy;
-bool DRAMCacheCtrl::switched_gpu_running;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
@@ -1760,13 +1759,13 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 #endif
 		if(CudaGPU::running)
 		{
-			inform("GPU started");
+			inform("%s GPU started", name());
 			if (dirtyCleanBypassEnable)
 				inform("dirty/clean bypass for CPU req started");
 		}
 		else
 		{
-			inform("GPU stopped");
+			inform("%s GPU stopped", name());
 			if(dirtyCleanBypassEnable)
 				inform("dirty/clean bypass for CPU req stopped");
 		}
