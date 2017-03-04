@@ -26,7 +26,6 @@ using namespace Data;
 
 map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
 int DRAMCacheCtrl::predAccuracy;
-bool DRAMCacheCtrl::switched_gpu_running;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
@@ -187,7 +186,6 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				isGPUOwned[cacheSet] = false;
 				switched_to_cpu_line++;
 			}
-			dramCache_cpu_hits++;
 			if(pkt->req->contextId() != 0)
 				dramCache_noncpu0_cpu_hits++;
 		}
@@ -274,7 +272,6 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			DPRINTF(DRAMCache, "CPU request %d is a %s miss\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
 
-			dramCache_cpu_misses++;
 			if (set[cacheSet].valid)
 			{
 				dramCache_evicts++;
@@ -1199,11 +1196,12 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
+	uint64_t cacheRow = floor(addr/15);
 	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
 	// account for tags for each 15 sets (i.e each row)
-	addr += floor(addr/15) * 2;
+	addr += (cacheRow * 2);
 
     unsigned pktsServicedByWrQFillQ = 0;
     BurstHelper* burst_helper = NULL;
@@ -1370,11 +1368,12 @@ DRAMCacheCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
     // ADARSH calcuating DRAM cache address here
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
+	uint64_t cacheRow = floor(addr/15);
 	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
 	// account for tags for each 15 sets (i.e each row)
-	addr += floor(addr/15) * 2;
+	addr += (cacheRow * 2);
 
 	BurstHelper* burst_helper = NULL;
 
@@ -1463,11 +1462,12 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 	// ADARSH calcuating DRAM cache address here
 	addr = addr / dramCache_block_size;
 	addr = addr % dramCache_num_sets;
+	uint64_t cacheRow = floor(addr/15);
 	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
 	addr = addr * pktCount;
 
 	// account for tags for each 15 sets (i.e each row)
-	addr += floor(addr/15) * 2;
+	addr += (cacheRow * 2);
 
 	if (fillQueueFull(pktCount))
 	{
@@ -2365,9 +2365,13 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_cpu_hits")
 		.desc ("Number of hits for CPU Requests");
 
+	dramCache_cpu_hits = dramCache_cpu_read_hits + dramCache_cpu_write_hits;
+
 	dramCache_cpu_misses
 		.name (name () + ".dramCache_cpu_misses")
 		.desc ("Number of misses for CPU Requests");
+
+	dramCache_cpu_misses = dramCache_cpu_write_misses + dramCache_cpu_write_misses;
 
 	dramCache_mshr_hits
 		.name (name () + ".dramCache_mshr_hits")
