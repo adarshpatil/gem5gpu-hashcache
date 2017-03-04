@@ -1501,6 +1501,7 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 	if (set[cacheSet].dirty && set[cacheSet].valid)
 		doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
 
+	bool wasGPU = isGPUOwned[cacheSet];
 	// change the tag directory
 	set[cacheSet].tag = cacheTag;
 	set[cacheSet].dirty = false;
@@ -1509,7 +1510,8 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 			pkt->req->contextId() == 31 ? true:false;
 
 	// remove from bypass tag when we fill into DRAMCache
-	if (bypassTagEnable)
+	// only CPU lines are allowed into the eviction bypasstag table
+	if (bypassTagEnable && !wasGPU)
 	{
 		bypassTag->removeFromBypassTag(pkt->getAddr());
 		bypassTag->insertIntoBypassTag(evictAddr);
@@ -1683,6 +1685,8 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 		return true;
 	}
 
+	// for all requests - GPU/CPU, read/write all the time, we check in the
+	// bypass tag before we get into the DRAMCache Queue
 	if (bypassTagEnable)
 	{
 		if (bypassTag->isHit(pkt->getAddr()))
