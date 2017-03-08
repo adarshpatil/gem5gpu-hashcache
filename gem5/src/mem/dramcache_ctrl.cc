@@ -112,6 +112,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	inform("DRAMCache Bypass tag enabled %d bypass tag size %d",
 			bypassTagEnable, p->bypass_tag_size);
 	inform("DRAMCache Dirty/Clean bypass enabled %d", dirtyCleanBypassEnable);
+	inform("DRAMCache bloom filter bypass enabled %d", bloomFilterEnable);
 }
 
 void
