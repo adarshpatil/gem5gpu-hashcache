@@ -34,6 +34,8 @@
 #include "debug/DRAMCache.hh"
 #include "base/random.hh"
 #include "base/callback.hh"
+#include "mem/bf.h"
+#include "mem/bf/bloom_filter.h"
 
 #define DRAM_PKT_COUNT 2
 #define PREDICTION_LATENCY 5
@@ -278,10 +280,16 @@ class DRAMCacheCtrl : public DRAMCtrl
     LRUTagStore *bypassTag;
     bool bypassTagEnable;
     bool dirtyCleanBypassEnable;
+    bool bloomFilterEnable;
     bool switched_gpu_running;
 
+    bf::counting_bloom_filter *cbf;
     Stats::Scalar dramCache_dirty_clean_bypass;
     Stats::Scalar dramCache_dirty_clean_bypass_miss;
+    Stats::Scalar dramCache_bloom_filter_input;
+    Stats::Scalar dramCache_bloom_filter_bypass;
+    Stats::Scalar dramCache_bloom_filter_mispred_hit;
+    Stats::Scalar dramCache_bloom_filter_mispred_miss;
 
     Random randomPredictor;
 

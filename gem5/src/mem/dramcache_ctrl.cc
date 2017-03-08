@@ -17,6 +17,7 @@
 
 using namespace std;
 using namespace Data;
+using namespace bf;
 
 // these things are #defined in gpgpu-sim; since we include cuda_gpu for
 // CudaGPU::running flag, we need to undef these
@@ -56,6 +57,13 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 
 	bypassTagEnable = p->bypass_tag_enable;
 	dirtyCleanBypassEnable = p->dirty_clean_bypass_enable;
+	bloomFilterEnable = p->bloom_filter_enable;
+	// 2 bit counter, 128KB per controller bloom filter (128KB/2)
+	if ( bloomFilterEnable )
+	{
+	    cbf = new counting_bloom_filter(make_hasher(2),524288,2);
+	}
+
 	if (bypassTagEnable)
 	{
 		bypassTag = new LRUTagStore(this, p->bypass_tag_size);
@@ -247,7 +255,11 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			if (set[cacheSet].dirty)
 				dramCache_writes_to_dirty_lines++;
 			else
+			{
+				if (bloomFilterEnable)
+					cbf->add(blockAlign(pkt->getAddr()));
 				set[cacheSet].dirty = true;
+			}
 
 		}
 
@@ -1499,7 +1511,11 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 
 	// this block needs to be evicted
 	if (set[cacheSet].dirty && set[cacheSet].valid)
+	{
+		if (bloomFilterEnable)
+			cbf->remove(evictAddr);
 		doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
+	}
 
 	bool wasGPU = isGPUOwned[cacheSet];
 	// change the tag directory
@@ -1783,12 +1799,16 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 			inform("%s GPU started", name());
 			if (dirtyCleanBypassEnable)
 				inform("dirty/clean bypass for CPU req started");
+			if (bloomFilterEnable)
+				inform("bloom filter bypass for CPU req started");
 		}
 		else
 		{
 			inform("%s GPU stopped", name());
 			if(dirtyCleanBypassEnable)
 				inform("dirty/clean bypass for CPU req stopped");
+			if(bloomFilterEnable)
+				inform("bloom filter bypass for CPU req stopped");
 		}
 	}
 
@@ -1813,6 +1833,24 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 			}
 			else if (cacheTag!=set[cacheSet].tag)
 				dramCache_dirty_clean_bypass_miss++;
+		}
+
+		// CPU request and GPU is running and dirtyCleanBypass is enabled
+		// and the set is clean then bypass
+		if (pkt->req->contextId() != 31 && CudaGPU::running &&
+				bloomFilterEnable)
+		{
+			dramCache_bloom_filter_input++;
+			if (cbf->lookup(blockAlign(pkt->getAddr()))==0)
+			{
+				allocateMissBuffer(pkt, PREDICTION_LATENCY, true);
+				dramCache_bloom_filter_bypass++;
+				return true;
+			}
+			else if (cacheTag!=set[cacheSet].tag)
+				dramCache_bloom_filter_mispred_miss++;
+			else if ((set[cacheSet].dirty==false) && (cacheTag==set[cacheSet].tag))
+				dramCache_bloom_filter_mispred_hit++;
 		}
 
 		assert(size != 0);
@@ -2359,7 +2397,6 @@ DRAMCacheCtrl::drain()
     }
 }
 
-
 void
 DRAMCacheCtrl::LRUTagStore::regStats()
 {
@@ -2759,6 +2796,22 @@ DRAMCacheCtrl::regStats ()
     dramCache_dirty_clean_bypass_miss
 	    .name(name() + ".dramCache_dirty_clean_bypass_miss")
         .desc("num of times read miss to a dirty line");
+
+    dramCache_bloom_filter_input
+	    .name(name() + ".dramCache_bloom_filter_input")
+        .desc("num bloom filter lookups");
+
+    dramCache_bloom_filter_bypass
+	    .name(name() + ".dramCache_bloom_filter_bypass")
+        .desc("num req bypassed by bloom filter");
+
+    dramCache_bloom_filter_mispred_hit
+	    .name(name() + ".dramCache_bloom_filter_mispred_hit")
+        .desc("num req mispred by bloom filter but were clean hit");
+
+    dramCache_bloom_filter_mispred_miss
+	    .name(name() + ".dramCache_bloom_filter_mispred_miss")
+        .desc("num req mispred by bloom filter which were miss");
 }
 
 BaseMasterPort &

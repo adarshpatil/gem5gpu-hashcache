@@ -1190,6 +1190,10 @@ main.SConscript('ext/gzstream/SConscript',
 main.SConscript('ext/libfdt/SConscript',
                 variant_dir = joinpath(build_root, 'libfdt'))
 
+# libbf is used by dramcache for bloom filter
+main.SConscript('ext/bf/SConscript',
+                variant_dir = joinpath(build_root, 'bf'))
+
 # fputils build is shared across all configs in the build root.
 main.SConscript('ext/fputils/SConscript',
                 variant_dir = joinpath(build_root, 'fputils'))
