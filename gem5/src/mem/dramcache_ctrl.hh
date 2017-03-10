@@ -290,6 +290,7 @@ class DRAMCacheCtrl : public DRAMCtrl
     Stats::Scalar dramCache_bloom_filter_bypass;
     Stats::Scalar dramCache_bloom_filter_mispred_hit;
     Stats::Scalar dramCache_bloom_filter_mispred_miss;
+    Stats::Scalar dramCache_cpu_not_inserted;
 
     Random randomPredictor;
 

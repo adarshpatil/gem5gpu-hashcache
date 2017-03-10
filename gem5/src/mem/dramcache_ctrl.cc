@@ -1510,78 +1510,87 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 	DPRINTF(DRAMCache, "%s PAM Evicting addr %d in cacheSet %d dirty %d\n",
 			__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
 
-	// this block needs to be evicted
-	if (set[cacheSet].dirty && set[cacheSet].valid)
+	if (CudaGPU::running && (pkt->req->contextId()!=31) &&
+			(dirtyCleanBypassEnable||bloomFilterEnable))
 	{
-		if (bloomFilterEnable)
-			cbf->remove(evictAddr);
-		doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
+		// we are not inserting into DRAMCache as we are in the bypass phase
+		dramCache_cpu_not_inserted++;
 	}
-
-	bool wasGPU = isGPUOwned[cacheSet];
-	// change the tag directory
-	set[cacheSet].tag = cacheTag;
-	set[cacheSet].dirty = false;
-	set[cacheSet].valid = true;
-	isGPUOwned[cacheSet] =
-			pkt->req->contextId() == 31 ? true:false;
-
-	// remove from bypass tag when we fill into DRAMCache
-	// only CPU lines are allowed into the eviction bypasstag table
-	if (bypassTagEnable && !wasGPU)
+	else
 	{
-		bypassTag->removeFromBypassTag(pkt->getAddr());
-		bypassTag->insertIntoBypassTag(evictAddr);
-	}
+		// this block needs to be evicted
+		if (set[cacheSet].dirty && set[cacheSet].valid)
+		{
+			if (bloomFilterEnable)
+				cbf->remove(evictAddr);
+			doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
+		}
 
-	// ADARSH calcuating DRAM cache address here
-	addr = addr / dramCache_block_size;
-	addr = addr % dramCache_num_sets;
-    uint64_t cacheRow = floor(addr/15);
-	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
-	addr = addr * pktCount;
+		bool wasGPU = isGPUOwned[cacheSet];
+		// change the tag directory
+		set[cacheSet].tag = cacheTag;
+		set[cacheSet].dirty = false;
+		set[cacheSet].valid = true;
+		isGPUOwned[cacheSet] =
+				pkt->req->contextId() == 31 ? true:false;
 
-	// account for tags for each 15 sets (i.e each row)
-	addr += (cacheRow* 2);
+		// remove from bypass tag when we fill into DRAMCache
+		// only CPU lines are allowed into the eviction bypasstag table
+		if (bypassTagEnable && !wasGPU)
+		{
+			bypassTag->removeFromBypassTag(pkt->getAddr());
+			bypassTag->insertIntoBypassTag(evictAddr);
+		}
 
-	if (fillQueueFull(pktCount))
-	{
-		// fillQueue is full we just drop the requests since we don't want to
-		// add complications by doing a retry etc.
-		// no correctness issues - fillQueue is just to model DRAM latencies
-		warn("DRAMCache fillQueue full, dropping req addr %d", pkt->getAddr());
-		return;
-	}
+		// ADARSH calcuating DRAM cache address here
+		addr = addr / dramCache_block_size;
+		addr = addr % dramCache_num_sets;
+		uint64_t cacheRow = floor(addr/15);
+		// ADARSH packet count is 2; we need to number our sets in multiplies of 2
+		addr = addr * pktCount;
 
-	for (int cnt = 0; cnt < pktCount; ++cnt) {
-		dramCache_fillBursts++;
+		// account for tags for each 15 sets (i.e each row)
+		addr += (cacheRow* 2);
 
-        // see if we can merge with an existing item in the fill
-        // queue and keep track of whether we have merged or not
-        bool merged = isInFillQueue.find(make_pair(pkt->getAddr(),addr)) !=
-            isInFillQueue.end();
+		if (fillQueueFull(pktCount))
+		{
+			// fillQueue is full we just drop the requests since we don't want to
+			// add complications by doing a retry etc.
+			// no correctness issues - fillQueue is just to model DRAM latencies
+			warn("DRAMCache fillQueue full, dropping req addr %d", pkt->getAddr());
+			return;
+		}
 
-        // if the item was not merged we need to enqueue it
-        if (!merged)
-        {
-            assert(pkt->req->hasContextId());
-            DRAMPacket* dram_pkt = decodeAddr(pkt, addr, burstSize, false);
-            dram_pkt->requestAddr = pkt->getAddr();
-            dram_pkt->isFill = true;
+		for (int cnt = 0; cnt < pktCount; ++cnt) {
+			dramCache_fillBursts++;
 
-            assert(fillQueue.size() < fillBufferSize);
+			// see if we can merge with an existing item in the fill
+			// queue and keep track of whether we have merged or not
+			bool merged = isInFillQueue.find(make_pair(pkt->getAddr(),addr)) !=
+				isInFillQueue.end();
 
-            DPRINTF(DRAMCache, "Adding to fill queue addr:%d\n", pkt->getAddr());
+			// if the item was not merged we need to enqueue it
+			if (!merged)
+			{
+				assert(pkt->req->hasContextId());
+				DRAMPacket* dram_pkt = decodeAddr(pkt, addr, burstSize, false);
+				dram_pkt->requestAddr = pkt->getAddr();
+				dram_pkt->isFill = true;
 
-            fillQueue.push_back(dram_pkt);
-            isInFillQueue.insert(make_pair(pkt->getAddr(),addr));
+				assert(fillQueue.size() < fillBufferSize);
 
-            dramCache_avgFillQLen = fillQueue.size();
+				DPRINTF(DRAMCache, "Adding to fill queue addr:%d\n", pkt->getAddr());
 
-            assert(fillQueue.size() == isInFillQueue.size());
-        }
+				fillQueue.push_back(dram_pkt);
+				isInFillQueue.insert(make_pair(pkt->getAddr(),addr));
 
-		addr = addr + 1;
+				dramCache_avgFillQLen = fillQueue.size();
+
+				assert(fillQueue.size() == isInFillQueue.size());
+			}
+
+			addr = addr + 1;
+		}
 	}
 
     // If we are not already scheduled to get a request out of the
@@ -2813,6 +2822,10 @@ DRAMCacheCtrl::regStats ()
     dramCache_bloom_filter_mispred_miss
 	    .name(name() + ".dramCache_bloom_filter_mispred_miss")
         .desc("num req mispred by bloom filter which were miss");
+
+    dramCache_cpu_not_inserted
+		.name(name() + ".dramCache_cpu_not_inserted")
+		.desc("num times cpu line was not inserted into cache");
 }
 
 BaseMasterPort &
