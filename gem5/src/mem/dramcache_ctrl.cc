@@ -2582,6 +2582,22 @@ DRAMCacheCtrl::regStats ()
 		.name (name () + ".dramCache_cpu_writebuffer_hits")
 		.desc ("Number of hits for CPU requests in the writebuffer");
 
+	dramCache_tot_mshr_used
+		.name (name() + ".dramCache_tot_mshr_used")
+		.desc ("total num of mshr used");
+
+	dramCache_tot_writebuffer_used
+		.name (name() + ".dramCache_tot_writebuffer_used")
+		.desc ("total number of wbuffer used");
+
+	dramCache_max_mshr_used
+		.name (name() + ".dramCache_max_mshr_used")
+		.desc ("max num of mshr used");
+
+	dramCache_max_writebuffer_used
+		.name (name() + ".dramCache_max_writebuffer_used")
+		.desc ("max wbuffer used");
+
     dramCache_pam_requests
         .name (name() + ".dramCache_pam_requests")
         .desc("Number of pam requests sent");
