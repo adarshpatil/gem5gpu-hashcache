@@ -12,7 +12,6 @@
 #include "mem/ruby/system/RubyPort.hh"
 #include "sim/system.hh"
 
-#include <algorithm>
 #include <tuple>
 
 using namespace std;
@@ -28,6 +27,7 @@ using namespace bf;
 
 map <int, DRAMCacheCtrl::predictorTable>  DRAMCacheCtrl::predictor;
 int DRAMCacheCtrl::predAccuracy;
+int DRAMCacheCtrl::chainingCPUThreshold;
 
 DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
     DRAMCtrl (p), respondWriteEvent(this),
@@ -46,7 +46,8 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	num_cores(p->num_cores), dramCacheTimingMode(p->dramcache_timing),
 	fillBufferSize(p->fill_buffer_size),
 	fillHighThreshold(fillBufferSize * p->fill_high_thresh_perc / 100.0),
-	cacheFillsThisTime(0), cacheWritesThisTime(0)
+	cacheFillsThisTime(0), cacheWritesThisTime(0),
+	chainRespondEvent(this)
 {
 	DPRINTF(DRAMCache, "DRAMCacheCtrl constructor\n");
 	// determine the dram actual capacity from the DRAM config in Mbytes
@@ -54,6 +55,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 			* ranksPerChannel;
 
 	DRAMCacheCtrl::predAccuracy = p->prediction_accuracy;
+	DRAMCacheCtrl::chainingCPUThreshold = (15 * p->chaining_cpu_threshold/100.0);
 
 	bypassTagEnable = p->bypass_tag_enable;
 	dirtyCleanBypassEnable = p->dirty_clean_bypass_enable;
@@ -113,6 +115,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 			bypassTagEnable, p->bypass_tag_size);
 	inform("DRAMCache Dirty/Clean bypass enabled %d", dirtyCleanBypassEnable);
 	inform("DRAMCache bloom filter bypass enabled %d", bloomFilterEnable);
+	inform("chaining cpu threshold %d", chainingCPUThreshold);
 }
 
 void
@@ -143,6 +146,13 @@ DRAMCacheCtrl::init ()
 			set[i].written[j] = 0;
 		}*/
 	}
+	chainTable.resize(dramCache_num_sets);
+	chainTable.assign(dramCache_num_sets,0);
+	reverseChainTable.resize(dramCache_num_sets);
+	reverseChainTable.assign(dramCache_num_sets,0);
+
+	/*isRowChained.resize(totalRows);
+	isRowChained.assign(totalRows,false);*/
 }
 
 DRAMCacheCtrl*
@@ -150,6 +160,83 @@ DRAMCacheCtrlParams::create ()
 {
 	inform("Create DRAMCacheCtrl\n");
 	return new DRAMCacheCtrl (this);
+}
+
+bool
+DRAMCacheCtrl::doChainLookup(DRAMPacket* dram_pkt)
+{
+    unsigned int cacheSet, cacheTag, chainedSet;
+    tie(cacheSet, cacheTag) = getSetTagFromAddr(dram_pkt->requestAddr);
+
+    DPRINTF(DRAMCache,"%s cacheSet %d cacheTag %d dram_pkt_addr %d request addr %d\n",
+    		__func__, cacheSet, cacheTag, dram_pkt->addr, dram_pkt->requestAddr);
+    // doChainLookup should be called on if the set is chained
+    assert(chainTable[cacheSet]!=0);
+
+    // add rotation logic to find chainedSet
+    chainedSet = cacheSet + chainTable[cacheSet];
+    if((chainedSet/15) != (cacheSet/15))
+        chainedSet = ((floor(cacheSet/15))*15) + (chainedSet%15);
+
+    // the chained set needs to valid
+    assert(set[chainedSet].valid!=false);
+
+    if(set[chainedSet].tag == cacheTag)
+    {
+    	// HIT
+    	if ((dram_pkt->contextId == 31) && (!isGPUOwned[chainedSet]))
+    	{
+    		// gpu request & CPU owned chained set
+    			switched_to_gpu_line++;
+    	}
+    	else if ((dram_pkt->contextId !=31) && (isGPUOwned[chainedSet]))
+    	{
+    		// cpu request and GPU owned chained set
+    		switched_to_cpu_line++;
+    	}
+
+    	// set chained set owner to requester
+		isGPUOwned[chainedSet] = dram_pkt->contextId == 31 ? true:false;
+
+    	if (dram_pkt->isRead)
+    	{
+    		dramCache_chain_read_hits++;
+    		if (dram_pkt->contextId != 31)
+    			dramCache_chain_cpu_read_hits++;
+    	}
+    	else
+    	{
+    		if (set[chainedSet].dirty==false)
+    		{
+    			// first write to a clean line; that makes this line dirty
+    			// insert into bloom filter
+				if (bloomFilterEnable)
+					cbf->add(blockAlign(dram_pkt->requestAddr));
+    		}
+    		dramCache_chain_write_hits++;
+    		if (dram_pkt->contextId != 31)
+    			dramCache_chain_cpu_write_hits++;
+    		if (set[chainedSet].dirty)
+    			dramCache_chain_writes_to_dirty_lines++;
+    		set[cacheSet].chainDirty = true;
+    		set[chainedSet].dirty = true;
+    	}
+    	return true;
+    }
+    // MISS
+    if (dram_pkt->isRead)
+    {
+    	dramCache_chain_read_misses++;
+    	if (dram_pkt->contextId != 31)
+    		dramCache_chain_cpu_read_misses++;
+    }
+    else
+    {
+    	dramCache_chain_write_misses++;
+    	if (dram_pkt->contextId != 31)
+    		dramCache_chain_cpu_write_misses++;
+    }
+    return false;
 }
 
 bool
@@ -169,15 +256,15 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 	if ( pkt->req->contextId() == 31 )
 	{
 		dramCache_gpu_accesses_per_row[cacheRow]++;
-		// sample max_gpu_lines once in every 10 GPU accesses
-		max_gpu_lines_sample_counter = (max_gpu_lines_sample_counter + 1)%10;
+		// sample max_gpu_lines once in every 100 GPU accesses
+		max_gpu_lines_sample_counter = (max_gpu_lines_sample_counter + 1)%100;
 		if (max_gpu_lines_sample_counter == 0)
 		{
 			total_gpu_lines = count(isGPUOwned.begin(), isGPUOwned.end(), true);
 			if(total_gpu_lines > dramCache_max_gpu_lines.value())
 				dramCache_max_gpu_lines = total_gpu_lines;
 
-			int gpu_row_counter = 0;
+			/*int gpu_row_counter = 0;
 			auto isGPUOwned_itr = isGPUOwned.begin();
 			for(int r=0;r<totalRows;r++)
 			{
@@ -193,7 +280,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 
 				if (gpu_row_counter > 12)
 					dramCache_max_gpu_lines_per_row_above_80[r]++;
-			}
+			}*/
 		}
 	}
 	else if(pkt->req->contextId() != 0)
@@ -289,7 +376,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			//if (pkt->isRead() || (pkt->isWrite() && dramCache_write_allocate))
 			//	dramCache_gpu_occupancy_per_set.sample(cacheSet);
 
-			if (set[cacheSet].valid) // valid line - causes eviction
+			/*if (set[cacheSet].valid) // valid line - causes eviction
 			{
 				dramCache_evicts++;
 				if (set[cacheSet].dirty)
@@ -311,7 +398,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 					dramCache_gpu_replaced_cpu++;
 
 				}
-			}
+			}*/
 
 		}
 		else // it is a CPU req
@@ -319,7 +406,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			DPRINTF(DRAMCache, "CPU request %d is a %s miss\n",
 					pkt->getAddr(), pkt->cmd==MemCmd::WriteReq?"write":"read");
 
-			if (set[cacheSet].valid)
+			/*if (set[cacheSet].valid)
 			{
 				dramCache_evicts++;
 				if (set[cacheSet].dirty)
@@ -339,7 +426,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				{
 					// cpu req replacing cpu line
 				}
-			}
+			}*/
 		}
 
 		// adding to MSHR will be done elsewhere
@@ -355,7 +442,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 			dramCache_write_misses++;
 			if (pkt->req->contextId () != 31)
 				dramCache_cpu_write_misses++;
-			// gpu requesting a write and existing line was clean and not GPU owned
+			/*// gpu requesting a write and existing line was clean and not GPU owned
 			if (pkt->req->contextId () == 31 &&
 					!(set[cacheSet].dirty && isGPUOwned[cacheSet]) &&
 					dramCache_write_allocate)
@@ -364,7 +451,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 				if (total_gpu_dirty_lines
 						> dramCache_max_gpu_dirty_lines.value ())
 					dramCache_max_gpu_dirty_lines = total_gpu_dirty_lines;
-			}
+			}*/
 		}
 
 #ifdef PASS_PC
@@ -423,11 +510,11 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 	// decode the address based on the address mapping scheme, with
 	// Ro, Ra, Co, Ba and Ch denoting row, rank, column, bank and
 	// channel, respectively
-	uint8_t rank;
-	uint8_t bank;
+	uint8_t rank=0;
+	uint8_t bank=0;
 	// use a 64-bit unsigned during the computations as the row is
 	// always the top bits, and check before creating the DRAMPacket
-	uint64_t row;
+	uint64_t row=0;
 
 	//	ADARSH here the address should be the address of a set
 	//	cuz DRAMCache is addressed by set
@@ -834,6 +921,8 @@ DRAMCacheCtrl::processWriteRespondEvent()
 			// Now access is complete, TAD unit available => doCacheLookup
 			bool isHit = doCacheLookup (dram_pkt->pkt);
 
+			uint64_t chainLookupDelay = 0;
+
 			if (!isHit)
 			{
 				// write miss we have the entire cache line
@@ -842,8 +931,10 @@ DRAMCacheCtrl::processWriteRespondEvent()
 				//     if dirty put evicted line into writeBuffer, change tag and mark dirty
 				// if not writeAllocate
 				//     put entry for this line into writeBuffer
+				bool isChainedHit = false; // false if notChained or chainedMiss
 				if (dramCache_write_allocate)
 				{
+					fatal("write_allocate does not work with chaining currently");
 					// we need to fix write allocate policy code
 					// addtoFillQ etc
 					warn("write allocate policy might not be fully supported");
@@ -858,6 +949,7 @@ DRAMCacheCtrl::processWriteRespondEvent()
 						doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
 					}
 					// update tags
+					set[cacheSet].valid = true;
 					set[cacheSet].tag = cacheTag;
 					set[cacheSet].dirty = true;
 					isGPUOwned[cacheSet] =
@@ -867,17 +959,29 @@ DRAMCacheCtrl::processWriteRespondEvent()
 				else
 				{
 					DPRINTF(DRAMCache, "write miss, write no allocate\n");
-					// we should copy the data into new packet
-					// the data set in the packet is dynamic data
-					// the constructor has allocated space but not copied data
-					RequestPtr req = new Request(dram_pkt->pkt->getAddr(),
-							dramCache_block_size, 0, Request::wbMasterId);
-					req->setContextId(dram_pkt->pkt->req->contextId());
-					PacketPtr pkt = new Packet(req, MemCmd::WriteReq);
-					pkt->allocate();
-					memcpy(pkt->getPtr<uint8_t>(), dram_pkt->pkt->getPtr<uint8_t>(),
-							dramCache_block_size);
-					allocateWriteBuffer(pkt,curTick()+1);
+					unsigned int cacheSet, cacheTag;
+					tie(cacheSet,cacheTag) = getSetTagFromAddr(dram_pkt->pkt->getAddr());
+					if (chainTable[cacheSet])
+					{
+						// CHAINED SET - access the chained location
+						chainLookupDelay = doChainedAccess(cacheSet, dram_pkt);
+						dram_pkt->requestAddr = dram_pkt->pkt->getAddr();
+						isChainedHit = doChainLookup(dram_pkt);
+					}
+					if (!isChainedHit)
+					{
+					    // we should copy the data into new packet
+					    // the data set in the packet is dynamic data
+					    // the constructor has allocated space but not copied data
+					    RequestPtr req = new Request(dram_pkt->pkt->getAddr(),
+					            dramCache_block_size, 0, Request::wbMasterId);
+					    req->setContextId(dram_pkt->pkt->req->contextId());
+					    PacketPtr pkt = new Packet(req, MemCmd::WriteReq);
+					    pkt->allocate();
+					    memcpy(pkt->getPtr<uint8_t>(), dram_pkt->pkt->getPtr<uint8_t>(),
+					            dramCache_block_size);
+					    allocateWriteBuffer(pkt,curTick()+1+chainLookupDelay);
+					}
 				}
 			}
 
@@ -889,7 +993,7 @@ DRAMCacheCtrl::processWriteRespondEvent()
 			assert(!respPkt->isResponse());
 			respPkt->makeResponse();
 
-			respond(respPkt, frontendLatency);
+			respond(respPkt, frontendLatency+chainLookupDelay);
 		}
 	}
 	else
@@ -915,7 +1019,8 @@ DRAMCacheCtrl::processWriteRespondEvent()
 	{
 		// if there is nothing left in any queue, signal a drain
 		if (drainState () == DrainState::Draining && writeQueue.empty ()
-				&& readQueue.empty () && respQueue.empty())
+				&& readQueue.empty () && respQueue.empty()
+				&& chainRespQueue.empty())
 		{
 
 			DPRINTF(Drain, "%s DRAM Cache controller done draining\n", __func__);
@@ -935,6 +1040,10 @@ DRAMCacheCtrl::processRespondEvent ()
 
 	DPRINTF(DRAMCache, "%s for address %d\n", __func__, dram_pkt->pkt->getAddr());
 
+	// if access is complete then we can signal a retry for reads that
+	// were rejected earlier when the readQueue was full
+	bool accessComplete = false;
+
 	if (dram_pkt->burstHelper)
 	{
 		// it is a split packet
@@ -952,6 +1061,9 @@ DRAMCacheCtrl::processRespondEvent ()
 			// Now access is complete, TAD unit available => doCacheLookup
 			bool isHit = doCacheLookup (dram_pkt->pkt);
 
+			unsigned int cacheSet, cacheTag;
+			tie(cacheSet, cacheTag) = getSetTagFromAddr(dram_pkt->pkt->getAddr());
+
 #ifdef MAPI_PREDICTOR
 			auto pamQueueItr =  pamQueue.find(dram_pkt->pkt->getAddr());
 			bool isInPamQueue = (pamQueueItr != pamQueue.end());
@@ -962,10 +1074,14 @@ DRAMCacheCtrl::processRespondEvent ()
 				// second condition is evaluated only if first condition is true
 
 
-				pamQueueItr->second->isHit = isHit;
 				pamReq *pr = pamQueueItr->second;
-				DPRINTF(DRAMCache,"%s inPamQueue: true isHit: %d isPamComplete: %d\n",
-						 __func__,pr->isHit, pr->isPamComplete);
+				pr->isHit = isHit;
+				pr->isChained = chainTable[cacheSet]!=0?1:0;
+				pr->isChainDirty = set[cacheSet].chainDirty;
+				DPRINTF(DRAMCache,"%s inPamQueue: true isHit: %d isPamComplete: %d"
+						" isChained %d, isChainDirty %d\n", __func__,pr->isHit,
+						pr->isPamComplete, pr->isChained, pr->isChainDirty);
+
 				// this address has a PAM request
 				if (pr->isPamComplete)
 				{
@@ -973,6 +1089,7 @@ DRAMCacheCtrl::processRespondEvent ()
 					if (isHit)
 					{
 						// status: hit in dramcache
+						accessComplete = true;
 						// access and respond to current packet
 						access (dram_pkt->pkt);
 						respond (dram_pkt->pkt,frontendLatency+backendLatency);
@@ -992,80 +1109,129 @@ DRAMCacheCtrl::processRespondEvent ()
 							respond (tgt_pkt, frontendLatency+backendLatency);
 							pr->mshr->popTarget();
 						}
+						// deallocate MSHR and pamQueue entry
+						MSHRQueue *mq = pr->mshr->queue;
+						bool wasFull = mq->isFull();
+						mq->deallocate(pr->mshr);
+						delete pr;
+						pamQueue.erase(pamQueueItr);
+						if (wasFull && !mq->isFull ())
+							clearBlocked ((BlockedCause) mq->index);
 					}
 					else
 					{
-						// status: miss in dramcache
-						// first target packet contains data (clone_pkt) as per
-						// our mechanism in recvTimingResp
-						PacketPtr tgt_pkt, first_tgt_pkt;
-						assert(pr->mshr->getNumTargets()>=1);
-						first_tgt_pkt = pr->mshr->getTarget()->pkt;
 
-						Tick miss_latency = curTick () - pr->mshr->getTarget()->recvTime;
-						if (first_tgt_pkt->req->contextId () == 31)
-							dramCache_mshr_miss_latency[1] += miss_latency;
-						else
-							dramCache_mshr_miss_latency[0] += miss_latency;
+						// status: originalSet miss in dramcache
 
-						pr->mshr->popTarget();
-
-						// copy data and respond to current packet
-						memcpy(dram_pkt->pkt->getPtr<uint8_t>(),
-								first_tgt_pkt->getPtr<uint8_t>(),
-								dramCache_block_size);
-						dram_pkt->pkt->makeResponse();
-						//keep the contextId for later
-						assert(dram_pkt->pkt->req->hasContextId());
-						int cid = dram_pkt->pkt->req->contextId();
-						respond(dram_pkt->pkt, frontendLatency+backendLatency);
-
-						// copy data and respond to all packets in MSHR
-						while (pr->mshr->hasTargets())
+						// accessComplete means notChained or chainClean
+						// both cases use the PAM data to repond and fill
+						if (chainTable[cacheSet])
 						{
-							tgt_pkt = pr->mshr->getTarget ()->pkt;
-							memcpy(tgt_pkt->getPtr<uint8_t>(),
-									first_tgt_pkt->getPtr<uint8_t>(),
-									dramCache_block_size);
-							tgt_pkt->makeResponse();
-							respond(tgt_pkt, frontendLatency+backendLatency);
-							pr->mshr->popTarget ();
+							// status: set is chained
+						    if (set[cacheSet].chainDirty)
+						    {
+						        // chain is dirty
 
+						    	// for consistency we add the add the current
+						    	// packet to the back of the MSHR target
+						    	pr->mshr->allocateTarget(dram_pkt->pkt,
+						    			dram_pkt->pkt->headerDelay, order++);
+						    	accessComplete = false;
+
+						    	// do chained access
+						    	doChainedAccess(cacheSet, dram_pkt);
+						    }
+						    else
+						    {
+						    	accessComplete = true;
+						    	// chain set is Clean
+						    	// access complete, use data from
+						    	// PAM and respond; this is done later
+						    }
+						}
+						else
+						{
+							// status: set is not chained
+							accessComplete = true;
 						}
 
-						// put the data into dramcache
-						// fill the dramcache and update tags
+						if (accessComplete)
+						{
+						    // first target packet contains data (clone_pkt) as per
+						    // our mechanism in recvTimingResp
+						    PacketPtr tgt_pkt, first_tgt_pkt;
+						    assert(pr->mshr->getNumTargets()>=1);
+						    first_tgt_pkt = pr->mshr->getTarget()->pkt;
 
-						// add to fillQueue since we encountered a miss
-						// create a packet and add to fillQueue
-						// we can delete the packet as we never derefence it
-						RequestPtr req = new Request(first_tgt_pkt->getAddr(),
-								dramCache_block_size, 0, Request::wbMasterId);
-						req->setContextId(cid);
-						PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
-						addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
+						    Tick miss_latency = curTick () - pr->mshr->getTarget()->recvTime;
+						    if (first_tgt_pkt->req->contextId () == 31)
+							    dramCache_mshr_miss_latency[1] += miss_latency;
+						    else
+							    dramCache_mshr_miss_latency[0] += miss_latency;
 
-						delete clone_pkt;
+						    pr->mshr->popTarget();
 
-						delete first_tgt_pkt;
+    						// copy data and respond to current packet
+						    memcpy(dram_pkt->pkt->getPtr<uint8_t>(),
+								    first_tgt_pkt->getPtr<uint8_t>(),
+								    dramCache_block_size);
+						    dram_pkt->pkt->makeResponse();
+						    //keep the contextId for later
+						    assert(dram_pkt->pkt->req->hasContextId());
+						    int cid = dram_pkt->pkt->req->contextId();
+						    respond(dram_pkt->pkt, frontendLatency+backendLatency);
 
-					}
+						    // copy data and respond to all packets in MSHR
+						    while (pr->mshr->hasTargets())
+						    {
+							    tgt_pkt = pr->mshr->getTarget ()->pkt;
+							    memcpy(tgt_pkt->getPtr<uint8_t>(),
+									    first_tgt_pkt->getPtr<uint8_t>(),
+									    dramCache_block_size);
+							    tgt_pkt->makeResponse();
+							    respond(tgt_pkt, frontendLatency+backendLatency);
+							    pr->mshr->popTarget ();
 
-					// deallocate MSHR and pamQueue entry
-					MSHRQueue *mq = pr->mshr->queue;
-					bool wasFull = mq->isFull();
-					mq->deallocate(pr->mshr);
-					delete pr;
-					pamQueue.erase(pamQueueItr);
-					if (wasFull && !mq->isFull ())
-						clearBlocked ((BlockedCause) mq->index);
-				}
+    						}
+
+							// put the data into dramcache
+							// fill the dramcache and update tags
+						    // addtoFillQueue understands chaining
+
+							// add to fillQueue since we encountered a miss
+							// create a packet and add to fillQueue
+							// we can delete the packet as we never derefence it
+							RequestPtr req = new Request(first_tgt_pkt->getAddr(),
+									dramCache_block_size, 0, Request::wbMasterId);
+							req->setContextId(cid);
+							PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
+							addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
+							delete req;
+							delete clone_pkt;
+
+							delete first_tgt_pkt;
+
+							// deallocate MSHR and pamQueue entry
+							MSHRQueue *mq = pr->mshr->queue;
+							bool wasFull = mq->isFull();
+							mq->deallocate(pr->mshr);
+							delete pr;
+							pamQueue.erase(pamQueueItr);
+							if (wasFull && !mq->isFull ())
+								clearBlocked ((BlockedCause) mq->index);
+						}
+					} // END originalSet miss
+				// MSHR and PamQ still exist for chainDirty
+				// will be delloc at processChainRespondEvent()
+				} // END isPamComplete
+
 				else
 				{
 					// status: PAM request not yet returned
 					if (isHit)
 					{
 						// status: hit in dramcache
+						accessComplete = true;
 						// access and respond to current packet
 						access(dram_pkt->pkt);
 						respond(dram_pkt->pkt, frontendLatency+backendLatency);
@@ -1105,65 +1271,126 @@ DRAMCacheCtrl::processRespondEvent ()
 					}
 					else
 					{
-						// status: miss in dramcache
-						// add current packet to MSHR
-						pr->mshr->allocateTarget(dram_pkt->pkt,
-								dram_pkt->pkt->headerDelay, order++);
+						// status: miss in originalSet
+						if (chainTable[cacheSet])
+						{
+							// status: set is chained
+							accessComplete = false;
+					    	// for consistency we add the addr of the current
+					    	// packet to the back of the MSHR target
+							// so if PAM returns it will respond to the pkt
+					    	pr->mshr->allocateTarget(dram_pkt->pkt,
+					    			dram_pkt->pkt->headerDelay, order++);
+							// do chain access
+							doChainedAccess(cacheSet, dram_pkt);
+						}
+						else
+						{
+							// status: set not chained
+							accessComplete = true;
+						    // add current packet to MSHR
+						    pr->mshr->allocateTarget(dram_pkt->pkt,
+								    dram_pkt->pkt->headerDelay, order++);
 
-						// mshr will continue coalescing req
-						// response will be sent to all when memory req returns
+						    // mshr will continue coalescing req
+						    // response will be sent to all when memory req returns
+						}
 
 					}
 
 				}
-				processRespondHelper();
+				processRespondHelper(accessComplete);
 				return;
 
 			}
 #endif
 
-			if (!isHit)  // miss send cache fill request
+			if (!isHit)
 			{
-				// send cache fill to master port - master port sends from MSHR
-
-				// check if there is already an MSHR allocated for this addr
-				// this MSHR could have been allocated because of another PAM Req
-				Addr blk_addr = blockAlign(dram_pkt->pkt->getAddr());
-				MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
-				if (mshr)
+				// status: miss in original set
+				if (chainTable[cacheSet])
 				{
-					// mshr found - add target
-					DPRINTF(DRAMCache, "coalescing MSHR in %s, addr %#d\n",
-							__func__, dram_pkt->pkt->getAddr());
-					dramCache_mshr_hits++;
-					if (dram_pkt->contextId != 31)
-						dramCache_cpu_mshr_hits++;
-
-					mshr->allocateTarget (dram_pkt->pkt, dram_pkt->pkt->headerDelay, order++);
-					if (mshr->getNumTargets () == numTarget)
+					// status: set is chained
+					if (set[cacheSet].chainDirty)
 					{
-						noTargetMSHR = mshr;
-						warn("MSHR ran out of %d targets\n", numTarget);
-						setBlocked (Blocked_NoTargets);
+						// status: chained set is dirty
+						accessComplete = false;
+						// do chained access
+						doChainedAccess(cacheSet, dram_pkt);
 					}
+					else
+ 					{
+ 						// status: chain set is clean
+ 						// for GPU do chained access;
+ 						// for CPU go to memory - allocate MSHR
+ 						if (dram_pkt->pkt->req->contextId() == 31)
+ 						{
+ 							accessComplete = false;
+ 							doChainedAccess(cacheSet, dram_pkt);
+ 						}
+ 						else
+ 						{
+ 							accessComplete = true;
+ 							// try to coalesce with MSHR
+ 							// if not found create a new MSHR
+ 							// done later
+ 						}
+ 					}
+ 				} // END isChained
 
-				}
+
 				else
 				{
-					// mshr not found allocate new MSHR
-					allocateMissBuffer (dram_pkt->pkt, curTick()+1, true);
+					// status: set not chained
+					accessComplete = true;
+					// try to coalesce with MSHR
+ 					// if not found create a new MSHR
+ 					// done later
+
 				}
-			}
+
+				if (accessComplete)
+				{
+				    // check if there is already an MSHR allocated for this addr
+				    // this MSHR could have been allocated because of another PAM Req
+				    Addr blk_addr = blockAlign(dram_pkt->pkt->getAddr());
+				    MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
+				    if (mshr)
+				    {
+					    // mshr found - add target
+					    DPRINTF(DRAMCache, "coalescing MSHR in %s, addr %#d\n",
+							    __func__, dram_pkt->pkt->getAddr());
+					    dramCache_mshr_hits++;
+					    if (dram_pkt->contextId != 31)
+						    dramCache_cpu_mshr_hits++;
+
+					    mshr->allocateTarget (dram_pkt->pkt, dram_pkt->pkt->headerDelay, order++);
+					    if (mshr->getNumTargets () == numTarget)
+					    {
+						    noTargetMSHR = mshr;
+						    warn("MSHR ran out of %d targets\n", numTarget);
+						    setBlocked (Blocked_NoTargets);
+					    }
+
+				    }
+				    else
+				    {
+					    // mshr not found allocate new MSHR
+					    allocateMissBuffer (dram_pkt->pkt, curTick()+1, true);
+				    }
+				}
+			} // END !isHit
+
 			else
 			{
 				// continue to accessAndRespond if it is a hit
+				accessComplete = true;
 
 				// @todo we probably want to have a different front end and back
 				// end latency for split packets
 				access (dram_pkt->pkt);
 				respond (dram_pkt->pkt, frontendLatency + backendLatency);
 			}
-
 		}
 	}
 	else
@@ -1173,11 +1400,15 @@ DRAMCacheCtrl::processRespondEvent ()
 				dram_pkt->addr, dram_pkt->pkt->getAddr());
 		fatal("DRAMCache ctrl doesnt support single burst for read");
 	}
-	processRespondHelper();
+
+	// processRespondHelper sends a retry after every dram_pkt (burst) completes
+	// however the incoming request will require 2 bursts so it might not
+	// have space yet!
+	processRespondHelper(accessComplete);
 }
 
 void
-DRAMCacheCtrl::processRespondHelper()
+DRAMCacheCtrl::processRespondHelper(bool accessComplete)
 {
 	DRAMPacket* tmp = respQueue.front ();
 	respQueue.pop_front ();
@@ -1193,12 +1424,297 @@ DRAMCacheCtrl::processRespondHelper()
 	{
 		// if there is nothing left in any queue, signal a drain
 		if (drainState () == DrainState::Draining && writeQueue.empty ()
-				&& readQueue.empty () && dramPktWriteRespQueue.empty())
+				&& readQueue.empty () && dramPktWriteRespQueue.empty()
+				&& chainRespQueue.empty())
 		{
 
 			DPRINTF(Drain, "%s DRAM Cache controller done draining\n", __func__);
 			signalDrainDone ();
 		}
+	}
+
+	// We have made a location in the queue available at this point,
+	// so if there is a read that was forced to wait, retry now
+	if (retryRdReq && accessComplete)
+	{
+		retryRdReq = false;
+		port.sendRetryReq ();
+	}
+}
+
+void
+DRAMCacheCtrl::processChainRespondEvent()
+{
+	// only chained read requests come here because we have to deal with PAM
+	// specifically only the second burst access in the chainedSet is scheduled
+	// chained write requests incur added chain latency always if set is chained
+
+	// we try not to use the dram_pkt->pkt as the PAM might have returned and
+	// responded to the request already
+
+	DPRINTF(DRAMCache,
+			"%s Some req has reached its readyTime\n", __func__);
+
+	DRAMPacket* dram_pkt = chainRespQueue.front ();
+
+	DPRINTF(DRAMCache, "%s for address %d\n", __func__, dram_pkt->requestAddr);
+
+	// only reads are scheduled for processChainRespondEvent()
+	// for writes we simply respond for hits, chainHit or chainMiss
+	// only difference is the response time
+	assert (dram_pkt->isRead);
+
+	unsigned int cacheSet, cacheTag;
+	tie(cacheSet, cacheTag) = getSetTagFromAddr(dram_pkt->requestAddr);
+	bool isChainedHit;
+
+	// Intuitively speaking the chain should not have been broken between
+	// processRespondEvent and processChainEvent; However due to memory request
+	// returning may cause the chain to be broken as memory request does not
+	// understand bus busy etc and just calls addToFillQ
+	// We treat these as a chainMiss and move on
+	if (chainTable[cacheSet]==0)
+	{
+		DPRINTF(DRAMCache,"chain broken requestAddr %d, cacheSet %d\n",
+				dram_pkt->requestAddr, cacheSet);
+		isChainedHit = false;
+	}
+	else
+		isChainedHit = doChainLookup(dram_pkt);
+
+#ifdef MAPI_PREDICTOR
+	auto pamQueueItr =  pamQueue.find(dram_pkt->requestAddr);
+	bool isInPamQueue = (pamQueueItr != pamQueue.end());
+	// we decided to remove the pkt comparison here
+	// hopefully sicne we already did the comparison in processRespondEvent and
+	// processChainEvent callback is immediate nothing bad would have happened
+	if (isInPamQueue && (dram_pkt->contextId!=31)) //&& (pamQueueItr->second->pkt == dram_pkt->pkt))
+	{
+		// pamQ isHit status is (originalHit OR chainedHit)
+		pamReq *pr = pamQueueItr->second;
+		// set chainedHit status in PAM entry
+		// chainDirty is already set by processRespondEvent
+		pr->isChainedHit = isChainedHit;
+		DPRINTF(DRAMCache,"%s inPamQueue: true isHit: false, isChainedHit: %d, "
+				"isChainDirty %d, isPamComplete: %d\n",__func__, isChainedHit,
+				pr->isChainDirty, pr->isPamComplete);
+
+		if (pr->isPamComplete)
+		{
+			if (isChainedHit==1)
+			{
+				// we read the chainDirty status from PAM request
+				// since the chain might have been broken
+				if (pr->isChainDirty)
+				{
+					// status: chainedHit and chain location was dirty
+					// current packet is not the original packet
+					// the original packet is at the back of the MSHR tgts
+
+					// throw away first target as this was the clone_pkt
+					// created to access the DRAM and also delete clone_pkt
+					assert(pr->mshr->getNumTargets()>=1);
+					delete pr->mshr->getTarget()->pkt;
+					pr->mshr->popTarget();
+
+					// access and repond to all packets in MSHR
+					while (pr->mshr->hasTargets())
+					{
+						MSHR::Target *target = pr->mshr->getTarget ();
+						Packet *tgt_pkt = target->pkt;
+						access (tgt_pkt);
+						respond (tgt_pkt, frontendLatency+backendLatency);
+						pr->mshr->popTarget();
+					}
+					// deallocate MSHR and pamQueue entry
+					MSHRQueue *mq = pr->mshr->queue;
+					bool wasFull = mq->isFull();
+					mq->deallocate(pr->mshr);
+					if (wasFull && !mq->isFull ())
+						clearBlocked ((BlockedCause) mq->index);
+				}
+			}
+			else
+			{
+				// status: miss in chained set
+				// we read the chainDirty status from PAM request
+				// since the chain might have been broken
+				if (pr->isChainDirty)
+				{
+				    // first target packet contains data (clone_pkt) as per
+				    // our mechanism in recvTimingResp
+				    PacketPtr tgt_pkt, first_tgt_pkt;
+				    assert(pr->mshr->getNumTargets()>=1);
+				    first_tgt_pkt = pr->mshr->getTarget()->pkt;
+
+				    Tick miss_latency = curTick () - pr->mshr->getTarget()->recvTime;
+				    if (first_tgt_pkt->req->contextId () == 31)
+					    dramCache_mshr_miss_latency[1] += miss_latency;
+				    else
+					    dramCache_mshr_miss_latency[0] += miss_latency;
+
+				    pr->mshr->popTarget();
+
+
+				    // copy data and respond to all packets in MSHR
+				    while (pr->mshr->hasTargets())
+				    {
+					    tgt_pkt = pr->mshr->getTarget ()->pkt;
+					    memcpy(tgt_pkt->getPtr<uint8_t>(),
+							    first_tgt_pkt->getPtr<uint8_t>(),
+							    dramCache_block_size);
+					    tgt_pkt->makeResponse();
+					    respond(tgt_pkt, frontendLatency+backendLatency);
+					    pr->mshr->popTarget ();
+
+					}
+
+					// put the data into dramcache
+					// fill the dramcache and update tags
+				    // addtoFillQueue understands chaining
+
+					// add to fillQueue since we encountered a miss
+					// create a packet and add to fillQueue
+					// we can delete the packet as we never derefence it
+					RequestPtr req = new Request(first_tgt_pkt->getAddr(),
+							dramCache_block_size, 0, Request::wbMasterId);
+					req->setContextId(dram_pkt->contextId);
+					PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
+					addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
+					delete req;
+					delete clone_pkt;
+
+					delete first_tgt_pkt;
+
+					MSHRQueue *mq = pr->mshr->queue;
+					bool wasFull = mq->isFull();
+					mq->deallocate(pr->mshr);
+					if (wasFull && !mq->isFull ())
+						clearBlocked ((BlockedCause) mq->index);
+				}
+			} // END isChainedHit
+			delete pr;
+			pamQueue.erase(pamQueueItr);
+		}// END isPamComplete
+		else
+		{
+			// status: pam has not yet returned
+			if (isChainedHit==1)
+			{
+				// status: hit in chainedSet
+
+				// throw away first target as that was the clone_pkt
+				// created to send to DRAM
+				assert(pr->mshr->getNumTargets()>=1);
+				delete pr->mshr->getTarget()->pkt;
+				pr->mshr->popTarget();
+
+				// iterate through MSHR and access and respond to all
+				while (pr->mshr->hasTargets())
+				{
+					PacketPtr tgt_pkt = pr->mshr->getTarget ()->pkt;
+					access(tgt_pkt);
+					respond(tgt_pkt,frontendLatency+backendLatency);
+					pr->mshr->popTarget();
+				}
+
+				// deallocate MSHR
+				MSHRQueue *mq = pr->mshr->queue;
+				bool wasFull = mq->isFull();
+				bool inService = pr->mshr->inService;
+				mq->deallocate(pr->mshr);
+				if (wasFull && !mq->isFull())
+					clearBlocked ((BlockedCause) mq->index);
+
+				// if mshr is not inService i.e. mshr request has not
+				// sent to memory, deallocate pamQ entry here itself
+				if (!inService)
+				{
+					DPRINTF(DRAMCache, "PAM MSHR not in service, removing pamQ entry\n");
+					delete pr;
+					pamQueue.erase(pamQueueItr);
+				}
+
+			} // END isChainedHit
+			else
+			{
+				// status: miss in chained set
+				// addToFillQueue will be done in recvTimingResp()
+			} // END !isChainedHit
+		}// END !isPamComplete
+
+
+		processChainHelper();
+		return;
+	} // END isinPamQueue
+#endif
+
+	if (isChainedHit==1)
+	{
+		access (dram_pkt->pkt);
+		respond (dram_pkt->pkt, frontendLatency + backendLatency);
+	}
+	else
+	{
+	    // check if there is already an MSHR allocated for this addr
+	    // this MSHR could have been allocated because of another PAM Req
+	    Addr blk_addr = blockAlign(dram_pkt->pkt->getAddr());
+	    MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
+	    if (mshr)
+	    {
+		    // mshr found - add target
+		    DPRINTF(DRAMCache, "coalescing MSHR in %s, addr %#d\n",
+				    __func__, dram_pkt->pkt->getAddr());
+		    dramCache_mshr_hits++;
+		    if (dram_pkt->contextId != 31)
+			    dramCache_cpu_mshr_hits++;
+
+		    mshr->allocateTarget (dram_pkt->pkt, dram_pkt->pkt->headerDelay, order++);
+		    if (mshr->getNumTargets () == numTarget)
+		    {
+			    noTargetMSHR = mshr;
+			    warn("MSHR ran out of %d targets\n", numTarget);
+			    setBlocked (Blocked_NoTargets);
+		    }
+
+	    }
+	    else
+	    {
+		    // mshr not found allocate new MSHR
+		    allocateMissBuffer (dram_pkt->pkt, curTick()+1, true);
+	    }
+
+	}
+
+	processChainHelper();
+
+}
+
+void
+DRAMCacheCtrl::processChainHelper()
+{
+	DRAMPacket* tmp = chainRespQueue.front ();
+	chainRespQueue.pop_front ();
+	delete tmp;
+
+	if (!chainRespQueue.empty ())
+	{
+		assert(chainRespQueue.front ()->readyTime >= curTick ());
+		assert(!chainRespondEvent.scheduled ());
+		schedule (chainRespondEvent, chainRespQueue.front ()->readyTime);
+	}
+	else
+	{
+		// if there is nothing left in any queue, signal a drain
+		if (drainState () == DrainState::Draining && writeQueue.empty ()
+				&& readQueue.empty () && dramPktWriteRespQueue.empty()
+				&& respQueue.empty())
+		{
+
+			DPRINTF(Drain, "%s DRAM Cache controller done draining\n", __func__);
+			signalDrainDone ();
+		}
+
 	}
 
 	// We have made a location in the queue available at this point,
@@ -1500,57 +2016,310 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 {
 	assert(pkt->isWrite());
 
-	Addr addr = pkt->getAddr();
-
 	// update tags
-	unsigned int cacheSet, cacheTag;
+	unsigned int cacheSet, cacheTag, fillSet;
 	tie(cacheSet, cacheTag) = getSetTagFromAddr(pkt->getAddr());
+	uint64_t cacheRow = floor(cacheSet/15);
 
-	Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-	DPRINTF(DRAMCache, "%s PAM Evicting addr %d in cacheSet %d dirty %d\n",
-			__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
+
+	int gpuThresh = (15 - chainingCPUThreshold);
+	auto isGPUOwned_itr = isGPUOwned.begin();
+	int gpuOccupancy; // = count(isGPUOwned_itr+(cacheRow*15), isGPUOwned_itr+((15*(cacheRow+1))-1), true);
 
 	if (CudaGPU::running && (pkt->req->contextId()!=31) &&
 			(dirtyCleanBypassEnable||bloomFilterEnable))
 	{
 		// we are not inserting into DRAMCache as we are in the bypass phase
 		dramCache_cpu_not_inserted++;
+
+	    // If we are not already scheduled to get a request out of the
+	    // queue, do so now
+	    if (!nextReqEvent.scheduled()) {
+	        DPRINTF(DRAMCache, "Request scheduled immediately\n");
+	        schedule(nextReqEvent, curTick());
+	    }
+
+	    // we are in chain no insert mode - return from here
+	    return;
+
 	}
+
+	if (pkt->req->contextId()==31)
+	{
+		// gpu request
+		if (chainTable[cacheSet])
+		{
+			// add rotation logic to find chainedSet
+			unsigned int chainedSet = cacheSet + chainTable[cacheSet];
+	        if((chainedSet/15) != (cacheSet/15))
+	            chainedSet = ((floor(cacheSet/15))*15) + (chainedSet%15);
+
+			// set chained
+			if (isGPUOwned[cacheSet] && isGPUOwned[chainedSet])
+			{
+				// GPU chained to GPU
+				dramCache_gpu_replaced_gpu++;
+				fillSet = cacheSet;
+			}
+			else if (!isGPUOwned[cacheSet] && isGPUOwned[chainedSet])
+			{
+				gpuOccupancy = count(isGPUOwned_itr+(cacheRow*15), isGPUOwned_itr+((15*(cacheRow+1))-1), true);
+				// CPU chained to GPU
+				if ((gpuOccupancy+1) >= gpuThresh)
+				{
+					// threshold reached
+					chaining_cpu_threshold_reached++;
+					dramCache_gpu_replaced_gpu++;
+					// add rotation logic to find fillSet
+					fillSet = chainedSet;
+				}
+				else
+				{
+					// threshold not reached
+					dramCache_gpu_replaced_cpu++;
+					fillSet = cacheSet;
+				}
+			}
+			else if (isGPUOwned[cacheSet] && !isGPUOwned[chainedSet])
+			{
+				gpuOccupancy = count(isGPUOwned_itr+(cacheRow*15), isGPUOwned_itr+((15*(cacheRow+1))-1), true);
+				// GPU chained to CPU
+				if ((gpuOccupancy+1) >= gpuThresh)
+				{
+					// threshold reached
+					chaining_cpu_threshold_reached++;
+					dramCache_gpu_replaced_gpu++;
+					fillSet = cacheSet;
+				}
+				else
+				{
+					// threshold not reached
+					dramCache_gpu_replaced_cpu++;
+					fillSet = chainedSet;
+				}
+			}
+			else
+			{
+				assert(!isGPUOwned[cacheSet] && !isGPUOwned[chainedSet]);
+				// CPU chained to CPU
+				gpuOccupancy = count(isGPUOwned_itr+(cacheRow*15), isGPUOwned_itr+((15*(cacheRow+1))-1), true);
+				if ((gpuOccupancy+1) >= gpuThresh)
+				{
+					// threshold reached
+					chaining_cpu_threshold_reached++;
+					dramCache_gpu_bypass++;
+					fillSet = UINT_MAX;
+				}
+				else
+				{
+					// threshold not reached
+					dramCache_gpu_replaced_cpu++;
+					fillSet = chainedSet;
+				}
+			}
+
+		} // END is chained
+		else
+		{
+			// set not chained
+			if (isGPUOwned[cacheSet])
+			{
+				// gpu replacing gpu
+				gpuOccupancy = count(isGPUOwned_itr+(cacheRow*15), isGPUOwned_itr+((15*(cacheRow+1))-1), true);
+				if ((gpuOccupancy+1) >= gpuThresh)
+				{
+					// threshold reached
+					chaining_cpu_threshold_reached++;
+					// replace original set
+					dramCache_gpu_replaced_gpu++;
+					fillSet = cacheSet;
+					if (reverseChainTable[fillSet])
+					{
+						dramCache_chain_unlink_by_gpu++;
+						unlinkReverseChain(fillSet);
+					}
+				}
+				else
+				{
+					// threshold not reached
+					// chain to a nearest available CPU line that is not chained
+					// if not found replace original set
+					int offset = 0;
+					for (int i = 1; i <= 3;i++)
+					{
+						// add rotation logic to find itrSet
+						unsigned int itrSet = cacheSet + i;
+				        if((itrSet/15) != (cacheSet/15))
+				        	itrSet = ((floor(cacheSet/15))*15) + (itrSet%15);
+
+						if (!isGPUOwned[itrSet] && (chainTable[itrSet]==0))
+						{
+							offset = i;
+							break;
+						}
+					}
+					fillSet = cacheSet + offset;
+			        if((fillSet/15) != (cacheSet/15))
+			            fillSet = ((floor(cacheSet/15))*15) + (fillSet%15);
+
+			        // the fill set found could be chained to by some other set
+			        if (reverseChainTable[fillSet])
+			        {
+			        	unlinkReverseChain(fillSet);
+			        	dramCache_chain_unlink_by_chain++;
+			        }
+
+					// create the new chain and enter in chainTable
+					// also set chain clean for original set
+					if (offset!=0)
+					{
+						dramCache_total_chained_sets++;
+						dramCache_gpu_replaced_cpu++;
+						//isRowChained[cacheRow] = true;
+						chainTable[cacheSet] = offset;
+						reverseChainTable[fillSet] = offset;
+						set[cacheSet].chainDirty = false;
+					}
+					else
+						dramCache_gpu_replaced_gpu++;
+				}
+			} // END gpu replacing gpu
+			else
+			{
+				// gpu replacing cpu
+				gpuOccupancy = count(isGPUOwned_itr+(cacheRow*15), isGPUOwned_itr+((15*(cacheRow+1))-1), true);
+				if ((gpuOccupancy+1) >= gpuThresh)
+				{
+					// threshold reached
+					chaining_cpu_threshold_reached++;
+					// chain to nearest GPU line that is not chained
+					// if not found bypass
+					bool chainFound = false;
+					int offset = 0;
+					for (int i = 1; i<=3; i++)
+					{
+						// add rotation logic to find itrSet
+						unsigned int itrSet = cacheSet + i;
+				        if((itrSet/15) != (cacheSet/15))
+				        	itrSet = ((floor(cacheSet/15))*15) + (itrSet%15);
+
+						if (isGPUOwned[itrSet] && (chainTable[itrSet]==0))
+						{
+							chainFound = true;
+							offset = i;
+							break;
+						}
+					}
+					if (chainFound)
+					{
+						assert(offset!=0);
+						fillSet = cacheSet + offset;
+				        if((fillSet/15) != (cacheSet/15))
+				            fillSet = ((floor(cacheSet/15))*15) + (fillSet%15);
+						dramCache_total_chained_sets++;
+						dramCache_gpu_replaced_gpu++;
+						if (reverseChainTable[fillSet])
+						{
+							unlinkReverseChain(fillSet);
+							dramCache_chain_unlink_by_chain++;
+						}
+						//isRowChained[cacheRow] = true;
+						chainTable[cacheSet] = offset;
+						reverseChainTable[fillSet] = offset;
+						set[cacheSet].chainDirty = false;
+					}
+					else
+					{
+						dramCache_gpu_bypass++;
+						fillSet = UINT_MAX;
+					}
+				}
+				else
+				{
+					// threshold not reached
+					// allow replacement to original set
+					dramCache_gpu_replaced_cpu++;
+					fillSet = cacheSet;
+					if (reverseChainTable[fillSet])
+					{
+						dramCache_chain_unlink_by_gpu++;
+						unlinkReverseChain(fillSet);
+					}
+				}
+			} // END gpu replacing cpu
+		} // END set not chained
+	} // END is gpu request
 	else
 	{
-		// this block needs to be evicted
-		if (set[cacheSet].dirty && set[cacheSet].valid)
+		// we are running chaining in no insert
+		// when GPU is running CPU req should never try to insert into cache
+		if (CudaGPU::running && bloomFilterEnable)
 		{
-			if (bloomFilterEnable)
-				cbf->remove(evictAddr);
-			doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
+			fatal("GPU inserting when GPU running");
+		}
+		// is a CPU request
+		if (chainTable[cacheSet])
+		{
+			// set is chained
+			fillSet = cacheSet;
+		}
+		else
+		{
+			// set is not chained
+			fillSet = cacheSet;
+			if(reverseChainTable[fillSet])
+			{
+				dramCache_chain_unlink_by_cpu++;
+				unlinkReverseChain(fillSet);
+			}
+		}
+		if (isGPUOwned[fillSet])
+			dramCache_cpu_replaced_gpu++;
+	} // END is cpu request
+
+	// if not bypass
+	if (fillSet != UINT_MAX)
+	{
+		Addr evictAddr = regenerateBlkAddr(fillSet, set[fillSet].tag);
+		DPRINTF(DRAMCache, "%s Evicting addr %d in fillSet %d for cacheSet %d "
+				"dirty %d\n", __func__, evictAddr ,fillSet, cacheSet,
+				set[fillSet].dirty);
+
+		if (fillSet != cacheSet)
+		{
+			// identified some chain location to fill
+			if (set[fillSet].dirty)
+				dramCache_chain_write_backs++;
 		}
 
-		bool wasGPU = isGPUOwned[cacheSet];
+		if (set[fillSet].valid)
+		{
+			dramCache_evicts++;
+			// this block needs to be written back
+			if (set[fillSet].dirty)
+			{
+				dramCache_write_backs++;
+				if (pkt->isRead())
+					dramCache_write_backs_on_read++;
+				if (bloomFilterEnable)
+					cbf->remove(blockAlign(evictAddr));
+				doWriteBack(evictAddr, isGPUOwned[fillSet]?31:0);
+			}
+		}
+
 		// change the tag directory
-		set[cacheSet].tag = cacheTag;
-		set[cacheSet].dirty = false;
-		set[cacheSet].valid = true;
-		isGPUOwned[cacheSet] =
-				pkt->req->contextId() == 31 ? true:false;
+		set[fillSet].tag = cacheTag;
+		set[fillSet].dirty = false;
+		set[fillSet].valid = true;
+		isGPUOwned[fillSet] = pkt->req->contextId() == 31 ? true:false;
 
-		// remove from bypass tag when we fill into DRAMCache
-		// only CPU lines are allowed into the eviction bypasstag table
-		if (bypassTagEnable && !wasGPU)
-		{
-			bypassTag->removeFromBypassTag(pkt->getAddr());
-			bypassTag->insertIntoBypassTag(evictAddr);
-		}
 
-		// ADARSH calcuating DRAM cache address here
-		addr = addr / dramCache_block_size;
-		addr = addr % dramCache_num_sets;
-		uint64_t cacheRow = floor(addr/15);
 		// ADARSH packet count is 2; we need to number our sets in multiplies of 2
-		addr = addr * pktCount;
+		Addr addr = fillSet * pktCount;
 
 		// account for tags for each 15 sets (i.e each row)
-		addr += (cacheRow* 2);
+		// cachRow and fillRow are same (requirement of chaining)
+		addr += (cacheRow * 2);
 
 		if (fillQueueFull(pktCount))
 		{
@@ -1845,7 +2614,7 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 				dramCache_dirty_clean_bypass_miss++;
 		}
 
-		// CPU request and GPU is running and dirtyCleanBypass is enabled
+		// CPU request and GPU is running and bloom filter is enabled
 		// and the set is clean then bypass
 		if (pkt->req->contextId() != 31 && CudaGPU::running &&
 				bloomFilterEnable)
@@ -1964,11 +2733,18 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 	{
 		pamQueueItr->second->isPamComplete = true;
 		pamReq *pr = pamQueueItr->second;
-		DPRINTF(DRAMCache,"%s inPamQueue: true isHit: %d\n", __func__, pr->isHit);
+		DPRINTF(DRAMCache,"%s inPamQueue: true, isHit: %d, isChained %d, "
+				"isChainedHit %d, isChainDirty %d \n", __func__, pr->isHit,
+				pr->isChained, pr->isChainedHit, pr->isChainDirty);
 		// found in PAM Queue
-		if (pr->isHit == -1)
+		if ( (pr->isHit == -1) ||
+				((pr->isHit==0) && (pr->isChained==1) && (pr->isChainedHit==-1)
+						&& (pr->isChainDirty==1)) )
 		{
-			dramCache_pam_returned_before_access++;
+			if (pr->isHit == -1)
+				dramCache_pam_returned_before_original_access++;
+			else
+				dramCache_pam_returned_before_chain_access++;
 			// DRAMCache hasn't done access so we dont know hit or miss
 			// we put the data returned from this packet, that came from DRAM
 			// into the first target of the MSHR for use incase of a miss
@@ -1980,14 +2756,21 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			delete pkt;
 			return;
 		}
-		else if (pr->isHit == true)
+		else if ( (pr->isHit == 1) ||
+				((pr->isHit==0) && (pr->isChained==1) && (pr->isChainedHit==1)) )
 		{
 			// do nothing here , delete packet and pamQueue done later
 			// as they are common between isHit true and false
 
 		}
-		else if (pr->isHit == false)
+		else if ( ((pr->isHit == 0) && (pr->isChained == 0))
+				|| ((pr->isHit==0) && (pr->isChained==1) && (pr->isChainedHit==0))
+				|| ((pr->isHit==0) && (pr->isChained==1)
+						&& (pr->isChainedHit==-1) && (pr->isChainDirty==0)) )
 		{
+
+			if ((pr->isHit==0) && (pr->isChained==1) && (pr->isChainedHit==-1) )
+				dramCache_pam_returned_before_chain_access++;
 			// the mshr in the recieved packet should be same as PAMQueue mshr
 			assert(mshr==pr->mshr);
 
@@ -2030,16 +2813,20 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
 			addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
+			delete req;
 			delete clone_pkt;
 		}
 
-		delete pkt->req;
 		delete pkt;
-		delete pr;
-		pamQueue.erase(pamQueueItr);
-
+		// access complete if Hit in original set or
+		// miss in original set and set is not chained
+		if ((pr->isHit==1) || ((pr->isHit==0) && (pr->isChained==0))
+				|| ((pr->isHit==0) && (pr->isChained==1) && (pr->isChainedHit!=-1)))
+		{
+			delete pr;
+			pamQueue.erase(pamQueueItr);
+		}
 		return;
-
 	}
 #endif
 
@@ -2052,8 +2839,9 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		noTargetMSHR = NULL;
 	}
 
-	if(mshr->queue->index == 0 && pkt->isRead())
+	if(mshr->queue->index == 0)
 	{
+		assert(pkt->isRead());
 		assert(mshr->getNumTargets()>=1);
 		MSHR::Target *initial_tgt = mshr->getTarget ();
 		// find the cache block, set id and tag
@@ -2074,6 +2862,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
 			addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
+			delete req;
 			delete clone_pkt;
 		}
 		else if (set[cacheSet].tag == cacheTag)
@@ -2083,6 +2872,8 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		}
 		else if (set[cacheSet].tag != cacheTag)
 		{
+			DPRINTF(DRAMCache, "%s cacheSet %d dirty %d\n",
+								__func__,cacheSet, set[cacheSet].dirty);
 			// add to fillQueue since we encountered a miss
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
@@ -2092,6 +2883,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
 			addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
+			delete req;
 			delete clone_pkt;
 		}
 
@@ -2117,8 +2909,9 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		}
 	}
 
-	else if(mshr->queue->index == 1 && pkt->isWrite())
+	else if(mshr->queue->index == 1)
 	{
+		assert(pkt->isWrite());
 		// write buffer cannot coalesce assert if more than 1 target
 		assert(mshr->getNumTargets()==1);
 		DPRINTF(DRAMCache,"write back completed addr %d\n", pkt->getAddr());
@@ -2139,6 +2932,181 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 	// this is because we could have used the reserves to allocate WriteBuffers/MSHR
 	if (wasFull && (!mq->isFull()))
 		clearBlocked ((BlockedCause) mq->index);
+
+}
+
+uint64_t
+DRAMCacheCtrl::doChainedAccess(unsigned int cacheSet, DRAMPacket* dram_pkt)
+{
+	assert (chainTable[cacheSet]!=0);
+    // chaining needed create 2 dram packets and call
+    Addr chainedSetAddr = getChainedAddr(cacheSet, chainTable[cacheSet]);
+    unsigned int chainedSet = cacheSet + chainTable[cacheSet];
+    if((chainedSet/15) != (cacheSet/15))
+        chainedSet = ((floor(cacheSet/15))*15) + (chainedSet%15);
+
+	DPRINTF(DRAMCache, "doChainedAccess request addr %d, dram_pkt addr %d, "
+			"chained set %d, chained set addr %d\n", dram_pkt->requestAddr,
+			dram_pkt->addr, chainedSet, chainedSetAddr);
+
+    DRAMPacket *chain_dram_pkt1 = new DRAMPacket (dram_pkt, chainedSetAddr);
+    DRAMPacket *chain_dram_pkt2 = new DRAMPacket (dram_pkt, chainedSetAddr+1);
+
+    doChainedDRAMAccess(chain_dram_pkt1);
+    doChainedDRAMAccess(chain_dram_pkt2);
+    uint64_t chainLookupDelay = chain_dram_pkt2->readyTime - curTick();
+
+    if (dram_pkt->pkt->isRead())
+    {
+    	delete chain_dram_pkt1;
+    	chainRespQueue.push_back(chain_dram_pkt2);
+    	if (!chainRespondEvent.scheduled())
+    		schedule (chainRespondEvent, chain_dram_pkt2->readyTime);
+    }
+    else if (dram_pkt->pkt->isWrite())
+    {
+    	delete chain_dram_pkt1;
+    	delete chain_dram_pkt2;
+    }
+    return chainLookupDelay;
+}
+
+void
+DRAMCacheCtrl::doChainedDRAMAccess(DRAMPacket* dram_pkt)
+{
+       DPRINTF(DRAMCache,"Chained Timing access to dram_pkt_addr %lld, "
+    		   "rank/bank/row %d %d %d\n",
+            dram_pkt->addr, dram_pkt->rank, dram_pkt->bank, dram_pkt->row);
+
+    // get the rank
+    //Rank& rank = dram_pkt->rankRef;
+
+    // get the bank
+    Bank& bank = dram_pkt->bankRef;
+
+    // respect any constraints on the command (e.g. tRCD or tCCD)
+    Tick cmd_at = std::max(bank.colAllowedAt, curTick());
+
+    // we need to wait until the bus is available before we can issue
+    // the command
+    cmd_at = std::max(cmd_at, busBusyUntil - tCL);
+
+    // update the packet ready time
+    dram_pkt->readyTime = cmd_at + tCL + tBURST;
+
+    // only one burst can use the bus at any one point in time
+    assert(dram_pkt->readyTime - busBusyUntil >= tBURST);
+
+    // update the time for the next read/write burst for each
+    // bank (add a max with tCCD/tCCD_L here)
+    Tick cmd_dly;
+    for(int j = 0; j < ranksPerChannel; j++) {
+        for(int i = 0; i < banksPerRank; i++) {
+            // next burst to same bank group in this rank must not happen
+            // before tCCD_L.  Different bank group timing requirement is
+            // tBURST; Add tCS for different ranks
+            if (dram_pkt->rank == j) {
+                if (bankGroupArch &&
+                   (bank.bankgr == ranks[j]->banks[i].bankgr)) {
+                    // bank group architecture requires longer delays between
+                    // RD/WR burst commands to the same bank group.
+                    // Use tCCD_L in this case
+                    cmd_dly = tCCD_L;
+                } else {
+                    // use tBURST (equivalent to tCCD_S), the shorter
+                    // cas-to-cas delay value, when either:
+                    // 1) bank group architecture is not supportted
+                    // 2) bank is in a different bank group
+                    cmd_dly = tBURST;
+                }
+            } else {
+                // different rank is by default in a different bank group
+                // use tBURST (equivalent to tCCD_S), which is the shorter
+                // cas-to-cas delay in this case
+                // Add tCS to account for rank-to-rank bus delay requirements
+                cmd_dly = tBURST + tCS;
+            }
+            ranks[j]->banks[i].colAllowedAt = std::max(cmd_at + cmd_dly,
+                                             ranks[j]->banks[i].colAllowedAt);
+        }
+    }
+
+    // Save rank of current access
+    activeRank = dram_pkt->rank;
+
+    // If this is a write, we also need to respect the write recovery
+    // time before a precharge, in the case of a read, respect the
+    // read to precharge constraint
+    bank.preAllowedAt = std::max(bank.preAllowedAt,
+                                 dram_pkt->isRead ? cmd_at + tRTP :
+                                 dram_pkt->readyTime + tWR);
+
+    // increment the bytes accessed and the accesses per row
+    bank.bytesAccessed += burstSize;
+    ++bank.rowAccesses;
+
+    // Update bus state
+    busBusyUntil = dram_pkt->readyTime;
+
+    DPRINTF(DRAMCache, "Chained Access to %lld, ready at %lld bus busy until %lld.\n",
+            dram_pkt->addr, dram_pkt->readyTime, busBusyUntil);
+
+    // Update the minimum timing between the requests, this is a
+    // conservative estimate of when we have to schedule the next
+    // request to not introduce any unecessary bubbles. In most cases
+    // we will wake up sooner than we have to.
+    nextReqTime = busBusyUntil - (tRP + tRCD + tCL);
+
+    // Update the stats
+    if (dram_pkt->isRead) {
+        ++readsThisTime;
+        readRowHits++;
+        readBursts++;
+        bytesReadDRAM += burstSize;
+        perBankRdBursts[dram_pkt->bankId]++;
+
+        // Update latency stats
+        totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+        totBusLat += tBURST;
+        totQLat += cmd_at - dram_pkt->entryTime;
+        if(dram_pkt->contextId == 31) {
+             gpuQLat += cmd_at - dram_pkt->entryTime;
+             bytesReadDRAMGPU += burstSize;
+             gpuMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+             gpuBusLat += tBURST;
+        }
+        else {
+            cpuQLat += cmd_at - dram_pkt->entryTime;
+            cpuMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+            cpuBusLat += tBURST;
+        }
+    } else {
+        ++writesThisTime;
+        writeRowHits++;
+        writeBursts++;
+        bytesWritten += burstSize;
+        if (dram_pkt->contextId==31)
+            bytesWrittenGPU += burstSize;
+        if (!dram_pkt->isFill)
+        {
+            // update latency stats for write requests
+            totWrMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+            totWrBusLat += tBURST;
+            totWrQLat += cmd_at - dram_pkt->entryTime;
+            if(dram_pkt->contextId == 31) {
+                 gpuWrQLat += cmd_at - dram_pkt->entryTime;
+                 gpuWrMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+                 gpuWrBusLat += tBURST;
+            }
+            else {
+                cpuWrQLat += cmd_at - dram_pkt->entryTime;
+                cpuWrMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+                cpuWrBusLat += tBURST;
+            }
+
+        }
+        perBankWrBursts[dram_pkt->bankId]++;
+    }
 
 }
 
@@ -2391,10 +3359,11 @@ DRAMCacheCtrl::drain()
     // if there is anything in any of our internal queues, keep track
     // of that as well
     if (!(writeQueue.empty() && readQueue.empty() && respQueue.empty()
-            && dramPktWriteRespQueue.empty())) {
+            && dramPktWriteRespQueue.empty()) && chainRespQueue.empty()) {
         DPRINTF(Drain, "DRAM Cache controller not drained, write: %d, read: %d,"
-                " resp: %d writeResp: %d\n", writeQueue.size(), readQueue.size(),
-                respQueue.size(), dramPktWriteRespQueue.size());
+                " resp: %d, writeResp: %d, chainResp: %d\n", writeQueue.size(),
+				readQueue.size(), respQueue.size(), dramPktWriteRespQueue.size(),
+				chainRespQueue.size());
 
         // the only part that is not drained automatically over time
         // is the write queue, thus kick things into action if needed
@@ -2602,13 +3571,13 @@ DRAMCacheCtrl::regStats ()
         .name (name() + ".dramCache_pam_requests")
         .desc("Number of pam requests sent");
 
-    dramCache_pam_returned_before_access
-        .name (name() + ".dramCache_pam_returned_before_access")
-        .desc("times pam returned before access in cache completed");
+    dramCache_pam_returned_before_original_access
+        .name ( name() + ".dramCache_pam_returned_before_original_access")
+        .desc("times pam returned before original access in cache completed");
 
-	dramCache_max_gpu_dirty_lines
-		.name (name () + ".dramCache_max_gpu_dirty_lines")
-		.desc ("maximum number of gpu dirty lines in cache");
+    dramCache_pam_returned_before_chain_access
+	    .name ( name() + ".dramCache_pam_returned_before_chain_access")
+		.desc("times pam returned before chained access completed");
 
 	dramCache_max_gpu_lines
 		.name (name () + ".dramCache_max_gpu_lines")
@@ -2839,9 +3808,105 @@ DRAMCacheCtrl::regStats ()
 	    .name(name() + ".dramCache_bloom_filter_mispred_miss")
         .desc("num req mispred by bloom filter which were miss");
 
+
+    // CHAINING STATS
+    dramCache_total_chained_sets
+        .name(name() + ".dramCache_total_chained_sets")
+        .desc("total num of sets chained");
+
+    chaining_cpu_threshold_reached
+        .name(name() + ".chaining_cpu_threshold_reached")
+        .desc("num times cpu threshold was reached");
+    dramCache_chain_read_hits
+        .name(name() + ".dramCache_chain_read_hits")
+        .desc("total num of chained read hits");
+
+    dramCache_chain_write_hits
+        .name(name() + ".dramCache_chain_write_hits")
+        .desc("total num of chained write hits");
+
+    dramCache_chain_read_misses
+        .name(name() + ".dramCache_chain_read_misses")
+        .desc("total num of chained read misses");
+
+    dramCache_chain_write_misses
+        .name(name() + ".dramCache_chain_write_misses")
+        .desc("total num of chained write misses");
+
+    dramCache_chain_cpu_hits
+        .name(name() + ".dramCache_chain_cpu_hits")
+        .desc("total num of chained cpu hits");
+
+    dramCache_chain_cpu_hits =
+            (dramCache_chain_cpu_read_hits + dramCache_chain_cpu_write_hits);
+
+    dramCache_chain_cpu_misses
+        .name(name() + ".dramCache_chain_cpu_misses")
+        .desc("total num of chained cpu misses");
+
+    dramCache_chain_cpu_misses =
+            (dramCache_chain_cpu_write_misses + dramCache_chain_cpu_read_misses);
+
+    dramCache_chain_gpu_hits
+        .name(name() + ".dramCache_chain_gpu_hits")
+        .desc("total num of chained gpu hits");
+
+    dramCache_chain_gpu_hits =
+            ( dramCache_chain_read_hits + dramCache_chain_write_hits )
+                - dramCache_chain_cpu_hits;
+
+    dramCache_chain_gpu_misses
+        .name(name() + ".dramCache_chain_gpu_misses")
+        .desc("total num of chained gpu misses");
+
+    dramCache_chain_gpu_misses =
+            ( dramCache_chain_read_misses + dramCache_chain_write_misses)
+                - dramCache_chain_cpu_misses;
+
+    dramCache_chain_cpu_read_hits
+        .name(name() + ".dramCache_chain_cpu_read_hits")
+        .desc("total num of chained cpu read hits");
+
+    dramCache_chain_cpu_read_misses
+        .name(name() + ".dramCache_chain_cpu_read_misses")
+        .desc("total num of chained cpu read misses");
+
+    dramCache_chain_cpu_write_hits
+        .name(name() + ".dramCache_chain_cpu_write_hits")
+        .desc("total num of chained cpu write hits");
+
+    dramCache_chain_cpu_write_misses
+        .name(name() + ".dramCache_chain_cpu_write_misses")
+        .desc("total num of chained cpu write misses");
+
+    dramCache_chain_write_backs
+		.name(name() + ".dramCache_chain_write_backs")
+		.desc("num times chain loc had to write back dirty line");
+
+    dramCache_chain_writes_to_dirty_lines
+		.name(name() + ".dramCache_chain_writes_to_dirty_lines")
+		.desc("num times dirty chain line was written to");
+
+    dramCache_chain_unlink_by_cpu
+        .name(name() + ".dramCache_chain_unlink_by_cpu")
+        .desc("total number of chains broken by cpu eviction");
+
+    dramCache_chain_unlink_by_gpu
+        .name(name() + ".dramCache_chain_unlink_by_gpu")
+        .desc("total number of chains broken by gpu eviction");
+
+    dramCache_chain_unlink_by_chain
+        .name(name() + ".dramCache_chain_unlink_by_chain")
+        .desc("total number of chains broken by another chain");
+
+    dramCache_gpu_bypass
+        .name(name() + ".dramCache_gpu_bypass")
+        .desc("number of gpu requests bypassed due to no chain found");
+
     dramCache_cpu_not_inserted
 		.name(name() + ".dramCache_cpu_not_inserted")
 		.desc("num times cpu line was not inserted into cache");
+
 }
 
 BaseMasterPort &

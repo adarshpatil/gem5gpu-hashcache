@@ -20,6 +20,8 @@
 #include <vector>
 #include <vector>
 #include <fstream>
+#include <algorithm>
+#include <functional>
 
 #include "base/statistics.hh"
 #include "enums/AddrMap.hh"
@@ -41,6 +43,10 @@
 #define PREDICTION_LATENCY 5
 #define MAPI_PREDICTOR
 #undef MEM_TRACE_DUMP
+
+// maximum number of lookups to do to find an alternative line for eviction
+// our chain table has 2 bits; 0 no chain, [1-3] chain locations
+#define CHAIN_MAX 3
 
 class DRAMCacheCtrl : public DRAMCtrl
 {
@@ -150,6 +156,7 @@ class DRAMCacheCtrl : public DRAMCtrl
     uint64_t num_sub_blocks_per_way;
     uint64_t total_gpu_lines; // moving count of total lines owned by GPU
     uint64_t total_gpu_dirty_lines; // moving count of total dirty lines owned by GPU
+    uint64_t total_chained_sets;
     uint64_t order; // mshr needs order for some reason
     const int numTarget;
 
@@ -185,7 +192,17 @@ class DRAMCacheCtrl : public DRAMCtrl
 	// holds Addr of requests that have been sent as PAM by predictor
 	typedef struct pamReq
 	{
-		int isHit; // -1 initially; 0 miss; 1 hit
+		// -1 set initially, originalSet lookup not complete
+		// 1 hit in originalSet
+		// 0 miss in originalSet
+		int8_t isHit;
+
+		// -1 initially; 1 if chained, 0 if not chained
+		int8_t isChained;
+		// -1 initially; 1 hit in chainedSet; 0 miss in chainedSet
+		int8_t isChainedHit;
+		// set only isChained=true
+		bool isChainDirty;
 		bool isPamComplete; // true if parallel memory request has returned
 		MSHR* mshr;
 		PacketPtr pkt;
@@ -193,6 +210,9 @@ class DRAMCacheCtrl : public DRAMCtrl
 		{
 			isPamComplete = false;
 			isHit = -1;
+			isChained = -1;
+			isChainedHit = -1;
+			isChainDirty = false;
 		}
 	}pamReq;
 	std::map<Addr,pamReq*> pamQueue;
@@ -210,6 +230,16 @@ class DRAMCacheCtrl : public DRAMCtrl
     // static prediction accuracy we want our predictor to have
     static int predAccuracy;
 
+    // gpu occupancy threshold above which gpu req are chained
+    static int chainingCPUThreshold;
+
+    // Event call back to respond after chainAccess has completed
+    // check if PAM returned after first and before second access
+    std::deque<DRAMPacket*> chainRespQueue;
+	void processChainRespondEvent();
+	EventWrapper<DRAMCacheCtrl, &DRAMCacheCtrl::processChainRespondEvent> chainRespondEvent;
+
+	void processChainHelper();
     // bypass tag store for CPU
     class LRUTagStore
     {
@@ -290,7 +320,6 @@ class DRAMCacheCtrl : public DRAMCtrl
     Stats::Scalar dramCache_bloom_filter_bypass;
     Stats::Scalar dramCache_bloom_filter_mispred_hit;
     Stats::Scalar dramCache_bloom_filter_mispred_miss;
-    Stats::Scalar dramCache_cpu_not_inserted;
 
     Random randomPredictor;
 
@@ -319,6 +348,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	    uint64_t tag;
 	    bool     valid;
 	    bool     dirty;
+	    bool     chainDirty;
 	    // cache sub-block counters
 	    //bool     *used; // a bit per each cache block sized chunk in the line to denote usage
 	    //uint64_t *written; // counter for each cache block write count
@@ -328,6 +358,11 @@ class DRAMCacheCtrl : public DRAMCtrl
 	};
 
 	struct dramCacheSet_t * set;
+
+	std::vector<uint8_t> chainTable;
+	std::vector<uint8_t> reverseChainTable;
+	//std::vector<bool> isRowChained;
+
 	std::vector<bool> isGPUOwned;
 	// counter for how often to sample max_gpu_lines
 	int max_gpu_lines_sample_counter;
@@ -382,7 +417,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_incorrect_pred; // number of miss predictions by predictor
 
 	Stats::Scalar dramCache_pam_requests; // number of times pam request sent
-	Stats::Scalar dramCache_pam_returned_before_access;
+	Stats::Scalar dramCache_pam_returned_before_original_access;
+	Stats::Scalar dramCache_pam_returned_before_chain_access;
 
 	Stats::Scalar dramCache_noncpu0_cpu_accesses;
 	Stats::Scalar dramCache_noncpu0_cpu_hits;
@@ -419,6 +455,110 @@ class DRAMCacheCtrl : public DRAMCtrl
     Stats::Scalar gpuWrQLat;
     Stats::Scalar gpuWrMemAccLat;
     Stats::Scalar gpuWrBusLat;
+
+    // CHAINING STATS
+    // total number of number of times set chaining was done
+    Stats::Scalar dramCache_total_chained_sets;
+    // number of times the CPU chaining threshold reached, forcing the
+    // conflicting gpu request to chain or bypass
+    Stats::Scalar chaining_cpu_threshold_reached;
+
+    Stats::Scalar dramCache_chain_read_hits;
+    Stats::Scalar dramCache_chain_write_hits;
+    Stats::Scalar dramCache_chain_read_misses;
+    Stats::Scalar dramCache_chain_write_misses;
+    // chain_gpu_hits/misses can be derived as total_hits/miss - cpu_hits/miss
+    Stats::Formula dramCache_chain_cpu_hits;
+    Stats::Formula dramCache_chain_cpu_misses;
+    Stats::Formula dramCache_chain_gpu_hits;
+    Stats::Formula dramCache_chain_gpu_misses;
+    Stats::Scalar dramCache_chain_cpu_read_hits;
+    Stats::Scalar dramCache_chain_cpu_read_misses;
+    Stats::Scalar dramCache_chain_cpu_write_hits;
+    Stats::Scalar dramCache_chain_cpu_write_misses;
+
+    Stats::Scalar dramCache_chain_write_backs;
+    Stats::Scalar dramCache_chain_writes_to_dirty_lines;
+
+
+    Stats::Scalar dramCache_chain_unlink_by_cpu;
+    Stats::Scalar dramCache_chain_unlink_by_gpu;
+    // a different set wanted to chain to this set, so it unlinked the previous chain set
+    // e.g. A->C; now B wants to chain to C; A->C unlink
+    Stats::Scalar dramCache_chain_unlink_by_chain;
+    // gpu bypass occurs when it can't find a GPU line in CHAIN_MAX lookaheads
+    Stats::Scalar dramCache_gpu_bypass;
+
+    Stats::Scalar dramCache_cpu_not_inserted;
+
+    // CHAINING HELPER FUNCTIONS
+    Addr getChainedAddr(unsigned int originalSet, uint8_t chainOffset)
+    {
+        // returns the first burst addr in the DRAMCache of the chainedSet
+        // does the wrap around if needed
+        Addr addr;
+        uint8_t pktCount = 2;
+
+        unsigned int chainedSet = originalSet + chainOffset;
+        if((chainedSet/15) != (originalSet/15))
+            chainedSet = ((floor(originalSet/15))*15) + (chainedSet%15);
+
+        uint64_t cacheRow = floor(originalSet/15);
+        // packet count is 2; we need to number our sets in multiplies of 2
+        addr = chainedSet * pktCount;
+
+        // account for tags for each 15 sets (i.e each row)
+        addr += (cacheRow * 2);
+
+        return addr;
+    }
+
+    // originalSet is the actual set
+    // chainedSet is the set to which originalSet is chained to
+    void unlinkChain(unsigned int originalSet)
+    {
+        assert(chainTable[originalSet]!=0);
+        unsigned int chainedSet = originalSet + chainTable[originalSet];
+        // if the chainedSet and cacheSet donot lie in same row; then we have
+        // to wrap around e.g. 73+3=76; 76/15=5; 73/15=4
+        if((chainedSet/15) != (originalSet/15))
+        {
+            chainedSet = ((floor(originalSet/15))*15) + (chainedSet%15);
+        }
+        reverseChainTable[chainedSet]=0;
+        chainTable[originalSet]=0;
+        /*unsigned int cacheRow = floor(chainedSet / 15);
+        auto chainTableItr = chainTable.begin();
+        int numChained = count_if(chainTableItr + (cacheRow*15),
+                chainTableItr + ((cacheRow+1)*15),
+                bind1st(std::less<uint8_t>(), 0));
+        if (numChained==0)
+            isRowChained[cacheRow] = false;*/
+
+    }
+
+    void unlinkReverseChain(unsigned int chainedSet)
+    {
+        assert(reverseChainTable[chainedSet]!=0);
+        unsigned int originalSet = chainedSet - reverseChainTable[chainedSet];
+        // if the chainedSet and cacheSet donot lie in same row; then we have
+        // to wrap around e.g. 60-3=57; 57/15=3; 60/15=4
+        if((originalSet/15) != (chainedSet/15))
+        {
+            originalSet = ((floor(chainedSet/15))*15) + (originalSet%15);
+        }
+        reverseChainTable[chainedSet]=0;
+        chainTable[originalSet]=0;
+
+        /*unsigned int cacheRow = floor(chainedSet / 15);
+        auto chainTableItr = chainTable.begin();
+        int numChained = count_if(chainTableItr + (cacheRow*15),
+                chainTableItr + ((15*(cacheRow+1))-1),
+                bind1st(std::less<uint8_t>(), 0));
+        if (numChained==0)
+             isRowChained[cacheRow] = false;*/
+    }
+
 
     std::pair<unsigned int, unsigned int> getSetTagFromAddr(Addr addr)
     {
@@ -497,6 +637,7 @@ class DRAMCacheCtrl : public DRAMCtrl
                                   PortID idx = InvalidPortID);
 
     bool doCacheLookup(PacketPtr pkt);  // check hit/miss; returns true for hit
+    bool doChainLookup(DRAMPacket* dram_pkt);  // check chained hit/miss; returns true for hit
 
     void doWriteBack(Addr evictAddr, int contextId);
 
@@ -647,9 +788,12 @@ class DRAMCacheCtrl : public DRAMCtrl
     void processNextReqEvent();
 
     void processRespondEvent();
-    // in this function we have some stuff that is common between
+    // 1) in this function we have some stuff that is common between
     // #define and #undef MAPI_PREDICTOR
-    void processRespondHelper();
+    // 2) since processRespondEvent sometimes has to do chainedAccess
+    // access is not yet complete when chainedAccess is invoked
+    // hence we cannot signal ReadRetry yet
+    void processRespondHelper(bool accessComplete);
 
     Tick recvAtomic(PacketPtr pkt);
 
@@ -657,6 +801,7 @@ class DRAMCacheCtrl : public DRAMCtrl
     void addToWriteQueue(PacketPtr pkt, unsigned int pktCount);
 
     // decode incoming pkt, create dram_pkt and push it to the back of fillQueue
+    // FillQueue now understands chaining and updates tags as well
     void addToFillQueue(PacketPtr pkt, unsigned int pktCount);
     // check if fill Queue has room for pktCount number of entries
     // true if full , false otherwise
@@ -665,6 +810,14 @@ class DRAMCacheCtrl : public DRAMCtrl
     bool recvTimingReq(PacketPtr pkt);
 
     void recvTimingResp(PacketPtr pkt);
+
+    // doChainedAccess creates 2 bursts and calls doChainedDRAMAccess to do
+    // the DRAM related operations. It then enqueues the packet for callback
+    // by chainRespondEvent with the appropriate chainLookupDelay
+    // input: cacheSet; dram_pkt used for originalSet access
+    // return: chainLookupDelay
+    uint64_t doChainedAccess(unsigned int cacheSet, DRAMPacket *dram_pkt);
+    void doChainedDRAMAccess(DRAMPacket* dram_pkt);
 
     void doDRAMAccess(DRAMPacket* dram_pkt);
 
