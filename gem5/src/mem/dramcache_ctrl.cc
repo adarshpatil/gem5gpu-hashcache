@@ -61,7 +61,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	// 2 bit counter, 128KB per controller bloom filter (128KB/2)
 	if ( bloomFilterEnable )
 	{
-	    cbf = new counting_bloom_filter(make_hasher(2),524288,2);
+	    cbf = new counting_bloom_filter(make_hasher(3),638976,2);
 	}
 
 	if (bypassTagEnable)
@@ -113,6 +113,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 			bypassTagEnable, p->bypass_tag_size);
 	inform("DRAMCache Dirty/Clean bypass enabled %d", dirtyCleanBypassEnable);
 	inform("DRAMCache bloom filter bypass enabled %d", bloomFilterEnable);
+	inform("DRAMCache bloom filter 156KB");
 }
 
 void
