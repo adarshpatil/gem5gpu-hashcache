@@ -36,11 +36,13 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	MSHRQueue_WriteBuffer), dramCache_size (p->dramcache_size),
 	dramCache_assoc (p->dramcache_assoc),
 	dramCache_block_size (p->dramcache_block_size),
+	dramCache_fetch_size(p->dramcache_fetch_size),
 	dramCache_write_allocate(p->dramcache_write_allocate),
 	dramCache_access_count (0), dramCache_num_sets (0),
 	replacement_scheme (p->dramcache_replacement_scheme), totalRows (0),
 	system_cache_block_size (128), // hardcoded to 128
-    num_sub_blocks_per_way (0), total_gpu_lines (0), total_gpu_dirty_lines (0),
+    num_sub_blocks_per_way (0), num_sub_blocks_per_fetch(0),
+	total_gpu_lines (0), total_gpu_dirty_lines (0),
 	order (0), numTarget (p->tgts_per_mshr), blocked (0), cacheMustSendRetry(false),
 	num_cores(p->num_cores), dramCacheTimingMode(p->dramcache_timing),
 	fillBufferSize(p->fill_buffer_size),
@@ -72,6 +74,7 @@ DRAMCacheCtrl::DRAMCacheCtrl (const DRAMCacheCtrlParams* p) :
 	dramCache_num_sets = totalRows * 15;
 
 	num_sub_blocks_per_way = dramCache_block_size / system_cache_block_size;
+	num_sub_blocks_per_fetch = dramCache_fetch_size / dramCache_block_size;
 
 	inform( "DRAMCache totalRows:%d columnsPerStripe:%d, channels:%d, "
 			"banksPerRank:%d, ranksPerChannel:%d, columnsPerRowBuffer:%d, "
@@ -124,6 +127,9 @@ DRAMCacheCtrl::init ()
 		set[i].tag = 0;
 		set[i].valid = false;
 		set[i].dirty = false;
+		set[i].used = false;
+		set[i].written = 0;
+		set[i].accessed = 0;
 		/*set[i].used = new bool[num_sub_blocks_per_way];
 		set[i].accessed = new uint64_t[num_sub_blocks_per_way];
 		set[i].written = new uint64_t[num_sub_blocks_per_way];
@@ -197,6 +203,8 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 	if ((set[cacheSet].tag == cacheTag) && set[cacheSet].valid)
 	{
 		// HIT
+		set[cacheSet].used = true;
+		set[cacheSet].accessed++;
 		if (pkt->req->contextId () == 31) // it is a GPU req
 		{
 			DPRINTF(DRAMCache, "GPU request %d is a %s hit\n",
@@ -233,6 +241,7 @@ DRAMCacheCtrl::doCacheLookup (PacketPtr pkt)
 		else
 		{
 			dramCache_write_hits++;
+			set[cacheSet].written++;
 			if (pkt->req->contextId () != 31)
 				dramCache_cpu_write_hits++;
 
@@ -940,7 +949,7 @@ DRAMCacheCtrl::processRespondEvent ()
 			bool isHit = doCacheLookup (dram_pkt->pkt);
 
 #ifdef MAPI_PREDICTOR
-			auto pamQueueItr =  pamQueue.find(dram_pkt->pkt->getAddr());
+			auto pamQueueItr =  pamQueue.find(fetchBlockAlign(dram_pkt->pkt->getAddr()));
 			bool isInPamQueue = (pamQueueItr != pamQueue.end());
 			if (isInPamQueue && (pamQueueItr->second->pkt == dram_pkt->pkt))
 			{
@@ -998,10 +1007,11 @@ DRAMCacheCtrl::processRespondEvent ()
 						pr->mshr->popTarget();
 
 						// copy data and respond to current packet
-						memcpy(dram_pkt->pkt->getPtr<uint8_t>(),
-								first_tgt_pkt->getPtr<uint8_t>(),
-								dramCache_block_size);
-						dram_pkt->pkt->makeResponse();
+						//memcpy(dram_pkt->pkt->getPtr<uint8_t>(),
+						//		first_tgt_pkt->getPtr<uint8_t>(),
+						//		dramCache_block_size);
+						//dram_pkt->pkt->makeResponse();
+						access(dram_pkt->pkt);
 						//keep the contextId for later
 						assert(dram_pkt->pkt->req->hasContextId());
 						int cid = dram_pkt->pkt->req->contextId();
@@ -1011,10 +1021,11 @@ DRAMCacheCtrl::processRespondEvent ()
 						while (pr->mshr->hasTargets())
 						{
 							tgt_pkt = pr->mshr->getTarget ()->pkt;
-							memcpy(tgt_pkt->getPtr<uint8_t>(),
-									first_tgt_pkt->getPtr<uint8_t>(),
-									dramCache_block_size);
-							tgt_pkt->makeResponse();
+							//memcpy(tgt_pkt->getPtr<uint8_t>(),
+							//		first_tgt_pkt->getPtr<uint8_t>(),
+							//		dramCache_block_size);
+							//tgt_pkt->makeResponse();
+							access(tgt_pkt);
 							respond(tgt_pkt, frontendLatency+backendLatency);
 							pr->mshr->popTarget ();
 
@@ -1027,7 +1038,7 @@ DRAMCacheCtrl::processRespondEvent ()
 						// create a packet and add to fillQueue
 						// we can delete the packet as we never derefence it
 						RequestPtr req = new Request(first_tgt_pkt->getAddr(),
-								dramCache_block_size, 0, Request::wbMasterId);
+								dramCache_fetch_size, 0, Request::wbMasterId);
 						req->setContextId(cid);
 						PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
 						addToFillQueue(clone_pkt,DRAM_PKT_COUNT);
@@ -1340,7 +1351,7 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
     //    this happens when there is a misprediction and the request is a hit in cache.
     //    for this case MSHR is deallocated but pamQ entry is retained for recvTimingResp
 	Addr blk_addr = blockAlign(pkt->getAddr());
-	auto pamQueueItr =  pamQueue.find(pkt->getAddr());
+	auto pamQueueItr =  pamQueue.find(fetchBlockAlign(pkt->getAddr()));
 	bool isInPamQueue = (pamQueueItr != pamQueue.end());
 	if ( (pktsServicedByWrQFillQ == 0) && (pkt->req->contextId() != 31) && !isInPamQueue)
 	{
@@ -1358,16 +1369,16 @@ DRAMCacheCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 			// create an entry in MSHR, which will send a request to memory
 
 			// we use pamQueue to track PAM requests
-			pamQueue[blk_addr] = new pamReq();
+			pamQueue[fetchBlockAlign(blk_addr)] = new pamReq();
 
 			// create MSHR entry
 			// 1) we are sure that MSHR entry doesn't exist for this address since if
 			//   there was an MSHR it would have been coalesced above
 			// 2) we create a new read packet as PAM request can return later than
 			//    actual DRAMCache access
-			pamQueue[blk_addr]->pkt = pkt;
+			pamQueue[fetchBlockAlign(blk_addr)]->pkt = pkt;
 			PacketPtr clone_pkt = new Packet (pkt, false, true);
-			pamQueue[blk_addr]->mshr =
+			pamQueue[fetchBlockAlign(blk_addr)]->mshr =
 					allocateMissBuffer(clone_pkt, curTick()+PREDICTION_LATENCY, true);
 		}
 	}
@@ -1487,91 +1498,115 @@ DRAMCacheCtrl::addToFillQueue(PacketPtr pkt, unsigned int pktCount)
 {
 	assert(pkt->isWrite());
 
-	Addr addr = pkt->getAddr();
-
-	// update tags
+	Addr blk_addr = fetchBlockAlign(pkt->getAddr());
+    Addr addr = blk_addr;
 	unsigned int cacheSet, cacheTag;
-	tie(cacheSet, cacheTag) = getSetTagFromAddr(pkt->getAddr());
+	uint8_t num_sub_blocks_used = 0, num_sub_blocks_dirty = 0;
 
-	Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
-	DPRINTF(DRAMCache, "%s PAM Evicting addr %d in cacheSet %d dirty %d\n",
-			__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
-
-	// this block needs to be evicted
-	if (set[cacheSet].dirty && set[cacheSet].valid)
-		doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
-
-	// change the tag directory
-	set[cacheSet].tag = cacheTag;
-	set[cacheSet].dirty = false;
-	set[cacheSet].valid = true;
-	isGPUOwned[cacheSet] =
-			pkt->req->contextId() == 31 ? true:false;
-
-	// remove from bypass tag when we fill into DRAMCache
-	if (bypassTagEnable)
+	// since we bring in large blocks we have to evict num_sub_blocks_per_fetch
+	// cache lines from our cache
+	for (int sub_block = 0; sub_block < num_sub_blocks_per_fetch; sub_block++)
 	{
-		bypassTag->removeFromBypassTag(pkt->getAddr());
-		bypassTag->insertIntoBypassTag(evictAddr);
+		tie(cacheSet, cacheTag) = getSetTagFromAddr(blk_addr);
+
+		Addr evictAddr = regenerateBlkAddr(cacheSet, set[cacheSet].tag);
+		DPRINTF(DRAMCache, "%s PAM Evicting addr %d in cacheSet %d dirty %d\n",
+				__func__, evictAddr ,cacheSet, set[cacheSet].dirty);
+
+		// this block needs to be evicted
+		if (set[cacheSet].dirty && set[cacheSet].valid)
+			doWriteBack(evictAddr, isGPUOwned[cacheSet]?31:0);
+
+		num_sub_blocks_used += set[cacheSet].used;
+		if (num_sub_blocks_dirty != 0 )
+			num_sub_blocks_dirty++;
+
+		// change the tag directory
+		set[cacheSet].tag = cacheTag;
+		set[cacheSet].dirty = false;
+		set[cacheSet].valid = true;
+		isGPUOwned[cacheSet] =
+				pkt->req->contextId() == 31 ? true:false;
+		set[cacheSet].written = 0;
+		if(blk_addr == blockAlign(pkt->getAddr()))
+		{
+			set[cacheSet].used = true;
+			set[cacheSet].accessed = 1;
+		}
+		else
+		{
+			set[cacheSet].used = false;
+			set[cacheSet].accessed = 0;
+		}
+
+		// remove from bypass tag when we fill into DRAMCache
+		if (bypassTagEnable)
+		{
+			bypassTag->removeFromBypassTag(pkt->getAddr());
+			bypassTag->insertIntoBypassTag(evictAddr);
+		}
+
+		// ADARSH calcuating DRAM cache address here
+		addr = addr / dramCache_block_size;
+		addr = addr % dramCache_num_sets;
+		uint64_t cacheRow = floor(addr/15);
+		// ADARSH packet count is 2; we need to number our sets in multiplies of 2
+		addr = addr * pktCount;
+
+		// account for tags for each 15 sets (i.e each row)
+		addr += (cacheRow* 2);
+
+		if (fillQueueFull(pktCount))
+		{
+			// fillQueue is full we just drop the requests since we don't want to
+			// add complications by doing a retry etc.
+			// no correctness issues - fillQueue is just to model DRAM latencies
+			warn("DRAMCache fillQueue full, dropping req addr %d", pkt->getAddr());
+			return;
+		}
+
+		for (int cnt = 0; cnt < pktCount; ++cnt) {
+			dramCache_fillBursts++;
+
+			// see if we can merge with an existing item in the fill
+			// queue and keep track of whether we have merged or not
+			bool merged = isInFillQueue.find(make_pair(pkt->getAddr(),addr)) !=
+				isInFillQueue.end();
+
+			// if the item was not merged we need to enqueue it
+			if (!merged)
+			{
+				assert(pkt->req->hasContextId());
+				DRAMPacket* dram_pkt = decodeAddr(pkt, addr, burstSize, false);
+				dram_pkt->requestAddr = pkt->getAddr();
+				dram_pkt->isFill = true;
+
+				assert(fillQueue.size() < fillBufferSize);
+
+				DPRINTF(DRAMCache, "Adding to fill queue addr:%d\n", blk_addr);
+
+				fillQueue.push_back(dram_pkt);
+				isInFillQueue.insert(make_pair(pkt->getAddr(),addr));
+
+				dramCache_avgFillQLen = fillQueue.size();
+
+				assert(fillQueue.size() == isInFillQueue.size());
+			}
+
+			addr = addr + 1;
+		}
+		blk_addr = blk_addr + 128;
+		addr = blk_addr;
 	}
 
-	// ADARSH calcuating DRAM cache address here
-	addr = addr / dramCache_block_size;
-	addr = addr % dramCache_num_sets;
-    uint64_t cacheRow = floor(addr/15);
-	// ADARSH packet count is 2; we need to number our sets in multiplies of 2
-	addr = addr * pktCount;
-
-	// account for tags for each 15 sets (i.e each row)
-	addr += (cacheRow* 2);
-
-	if (fillQueueFull(pktCount))
-	{
-		// fillQueue is full we just drop the requests since we don't want to
-		// add complications by doing a retry etc.
-		// no correctness issues - fillQueue is just to model DRAM latencies
-		warn("DRAMCache fillQueue full, dropping req addr %d", pkt->getAddr());
-		return;
-	}
-
-	for (int cnt = 0; cnt < pktCount; ++cnt) {
-		dramCache_fillBursts++;
-
-        // see if we can merge with an existing item in the fill
-        // queue and keep track of whether we have merged or not
-        bool merged = isInFillQueue.find(make_pair(pkt->getAddr(),addr)) !=
-            isInFillQueue.end();
-
-        // if the item was not merged we need to enqueue it
-        if (!merged)
-        {
-            assert(pkt->req->hasContextId());
-            DRAMPacket* dram_pkt = decodeAddr(pkt, addr, burstSize, false);
-            dram_pkt->requestAddr = pkt->getAddr();
-            dram_pkt->isFill = true;
-
-            assert(fillQueue.size() < fillBufferSize);
-
-            DPRINTF(DRAMCache, "Adding to fill queue addr:%d\n", pkt->getAddr());
-
-            fillQueue.push_back(dram_pkt);
-            isInFillQueue.insert(make_pair(pkt->getAddr(),addr));
-
-            dramCache_avgFillQLen = fillQueue.size();
-
-            assert(fillQueue.size() == isInFillQueue.size());
-        }
-
-		addr = addr + 1;
-	}
-
+	dramCache_sub_blocks_used [num_sub_blocks_used]++;
+	dramCache_sub_blocks_dirty [num_sub_blocks_dirty]++;
     // If we are not already scheduled to get a request out of the
     // queue, do so now
     if (!nextReqEvent.scheduled()) {
         DPRINTF(DRAMCache, "Request scheduled immediately\n");
         schedule(nextReqEvent, curTick());
     }
-
 }
 
 bool
@@ -1639,8 +1674,8 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 	// if write miss check writeAlloc policy? evict line : alloc writeBuffer
 
 	// ADARSH check MSHR if there is outstanding request for this address
-	Addr blk_addr = blockAlign(pkt->getAddr());
-	MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
+	Addr fetch_blk_addr = fetchBlockAlign(pkt->getAddr());
+	MSHR *mshr = mshrQueue.findMatch (fetch_blk_addr, false);
 	if (mshr)
 	{
 		if(pkt->cmd == MemCmd::WriteReq) {
@@ -1648,28 +1683,51 @@ DRAMCacheCtrl::recvTimingReq (PacketPtr pkt)
 			// write req means that some cache evicted the line out (writeback)
 			// the read request from another cache could have got the data from
 			// this cache via coherence not should not send the data to DRAMCache
-			fatal("DRAMCache got a write request coalescing with read");
+			// could a sub block write request
+			// this is fatal only if one of the target has a read req
+			// and write request came for the same sub block
+			bool isFatal = false;
+			MSHR::TargetList tl = mshr->getTargetList();
+			for (auto it=tl.begin(); it != tl.end(); ++it)
+			{
+				if (blockAlign(it->pkt->getAddr()) == blockAlign(pkt->getAddr()))
+					isFatal = true;
+			}
+
+			if(isFatal)
+				fatal("DRAMCache got a write request coalescing with read");
+
+			else
+			{
+				DPRINTF(DRAMCache,"write request for subblock when holding a MSHR\n");
+				dramCache_write_to_read_fetch++;
+				// this write will be added to write Q
+				// but will miss in the cache and allocate write buffer
+				// we can also allocate a write buffer and send to dram immediately
+			}
 		}
-
-		DPRINTF(DRAMCache, "%s coalescing MSHR for %s addr %#d\n", __func__,
-				pkt->cmdString(), pkt->getAddr());
-		dramCache_mshr_hits++;
-		if (pkt->req->contextId () != 31)
-			dramCache_cpu_mshr_hits++;
-
-		mshr->allocateTarget (pkt, pkt->headerDelay, order++);
-		if (mshr->getNumTargets () == numTarget)
+		else
 		{
-			noTargetMSHR = mshr;
-			warn("MSHR ran out of %d targets\n", numTarget);
-			setBlocked (Blocked_NoTargets);
+			DPRINTF(DRAMCache, "%s coalescing MSHR for %s addr %#d\n", __func__,
+					pkt->cmdString(), pkt->getAddr());
+			dramCache_mshr_hits++;
+			if (pkt->req->contextId () != 31)
+				dramCache_cpu_mshr_hits++;
+
+			mshr->allocateTarget (pkt, pkt->headerDelay, order++);
+			if (mshr->getNumTargets () == numTarget)
+			{
+				noTargetMSHR = mshr;
+				warn("MSHR ran out of %d targets\n", numTarget);
+				setBlocked (Blocked_NoTargets);
+			}
+			return true;
 		}
-		return true;
 	}
 
 	// ADARSH check writeBuffer if there is outstanding write back
 	// service from writeBuffer only if the request is a read (accessAndRespond)
-	mshr = writeBuffer.findMatch (blk_addr, false);
+	mshr = writeBuffer.findMatch (fetch_blk_addr, false);
 	if (mshr && pkt->isRead())
 	{
 		DPRINTF(DRAMCache, "%s servicing read using WriteBuffer for %s addr %#d\n",
@@ -1887,7 +1945,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 				pkt->cmdString(), pkt->getAddr(), pkt->getSize(), mshr->queue->index);
 
 #ifdef MAPI_PREDICTOR
-	auto pamQueueItr =  pamQueue.find(pkt->getAddr());
+	auto pamQueueItr =  pamQueue.find(fetchBlockAlign(pkt->getAddr()));
 	bool isInPamQueue = (pamQueueItr != pamQueue.end());
 	// should be in pamQueue and the resp should correspond to a MSHR request
 	// as only read requests are predicted
@@ -1941,9 +1999,10 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			{
 				MSHR::Target *target = mshr->getTarget ();
 				Packet *tgt_pkt = target->pkt;
-				memcpy(tgt_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
-							dramCache_block_size);
-				tgt_pkt->makeResponse();
+				//memcpy(tgt_pkt->getPtr<uint8_t>(), pkt->getPtr<uint8_t>(),
+				//			dramCache_block_size);
+				//tgt_pkt->makeResponse();
+				access(tgt_pkt);
 				respond(tgt_pkt,1);
 				mshr->popTarget();
 			}
@@ -1956,7 +2015,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
 			RequestPtr req = new Request(pkt->getAddr(),
-					dramCache_block_size, 0, Request::wbMasterId);
+					dramCache_fetch_size, 0, Request::wbMasterId);
 			assert(pkt->req->hasContextId());
 			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
@@ -2000,7 +2059,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
 			RequestPtr req = new Request(pkt->getAddr(),
-					dramCache_block_size, 0, Request::wbMasterId);
+					dramCache_fetch_size, 0, Request::wbMasterId);
 			assert(pkt->req->hasContextId());
 			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
@@ -2018,7 +2077,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			// create a packet and add to fillQueue
 			// we can delete the packet as we never derefence it
 			RequestPtr req = new Request(pkt->getAddr(),
-					dramCache_block_size, 0, Request::wbMasterId);
+					dramCache_fetch_size, 0, Request::wbMasterId);
 			assert(pkt->req->hasContextId());
 			req->setContextId(pkt->req->contextId());
 			PacketPtr clone_pkt = new Packet(req, MemCmd::WriteReq);
@@ -2038,7 +2097,7 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 			MSHR::Target *target = mshr->getTarget ();
 			Packet *tgt_pkt = target->pkt;
 
-			assert(pkt->getAddr() == tgt_pkt->getAddr());
+			assert(fetchBlockAlign(pkt->getAddr()) == fetchBlockAlign(tgt_pkt->getAddr()));
 
 			DPRINTF(DRAMCache,"%s return from read miss\n", __func__);
 			access(tgt_pkt);
@@ -2713,6 +2772,21 @@ DRAMCacheCtrl::regStats ()
     dramCache_dirty_clean_bypass_miss
 	    .name(name() + ".dramCache_dirty_clean_bypass_miss")
         .desc("num of times read miss to a dirty line");
+
+    dramCache_sub_blocks_used
+		.init(num_sub_blocks_per_fetch)
+        .name(name() + ".dramCache_sub_blocks_used")
+        .desc("num times n sub blocks were used");
+
+    dramCache_sub_blocks_dirty
+		.init(num_sub_blocks_per_fetch)
+        .name(name() + ".dramCache_sub_blocks_dirty")
+        .desc("num times n sub blocks were dirty");
+
+    dramCache_write_to_read_fetch
+		.name(name() + ".dramCache_write_to_read_fetch")
+		.desc("num times write req came for outstanding read fetch");
+
 }
 
 BaseMasterPort &
@@ -2812,7 +2886,10 @@ DRAMCacheCtrl::getTimingPacket ()
 	// for writeBuffer (writeReq) send same packet, but it was crashing
 	// so even for writeBuffer we created new packet
 	if(cmd == MemCmd::ReadReq)
-		pkt = new Packet(tgt_pkt,false,true);
+	{
+		pkt = new Packet(tgt_pkt->req,cmd,dramCache_fetch_size);
+		pkt->allocate();
+	}
 	else
 	{
 		pkt = new Packet (tgt_pkt->req, cmd, dramCache_block_size);

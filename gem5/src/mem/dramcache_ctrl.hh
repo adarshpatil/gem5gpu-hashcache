@@ -139,6 +139,7 @@ class DRAMCacheCtrl : public DRAMCtrl
 	uint64_t dramCache_size;
     uint64_t dramCache_assoc;
 	uint64_t dramCache_block_size;
+	uint64_t dramCache_fetch_size;
 	bool dramCache_write_allocate;
 	uint64_t dramCache_access_count;
 	uint64_t dramCache_num_sets;
@@ -146,6 +147,7 @@ class DRAMCacheCtrl : public DRAMCtrl
     uint64_t totalRows;
     uint64_t system_cache_block_size;
     uint64_t num_sub_blocks_per_way;
+    uint64_t num_sub_blocks_per_fetch;
     uint64_t total_gpu_lines; // moving count of total lines owned by GPU
     uint64_t total_gpu_dirty_lines; // moving count of total dirty lines owned by GPU
     uint64_t order; // mshr needs order for some reason
@@ -304,6 +306,11 @@ class DRAMCacheCtrl : public DRAMCtrl
 	    uint64_t tag;
 	    bool     valid;
 	    bool     dirty;
+	    // since these are sub blocks, they might get evicted without being used
+	    // or written. These counters track use, written and accessed
+	    bool     used; // a bit per each cache block sized chunk in the line to denote usage
+	    uint64_t written; // counter for each cache block write count
+	    uint64_t accessed; // counter for each cache block access count
 	    // cache sub-block counters
 	    //bool     *used; // a bit per each cache block sized chunk in the line to denote usage
 	    //uint64_t *written; // counter for each cache block write count
@@ -325,6 +332,11 @@ class DRAMCacheCtrl : public DRAMCtrl
 	Stats::Scalar dramCache_cpu_read_misses;
 	Stats::Scalar dramCache_cpu_write_hits;
 	Stats::Scalar dramCache_cpu_write_misses;
+
+	// how many sub blocks were used and dirty when evicted
+	Stats::Vector dramCache_sub_blocks_used;
+	Stats::Vector dramCache_sub_blocks_dirty;
+	Stats::Scalar dramCache_write_to_read_fetch;
 
 	Stats::Scalar dramCache_evicts;
 	Stats::Scalar dramCache_write_backs;
@@ -487,6 +499,8 @@ class DRAMCacheCtrl : public DRAMCtrl
 
     Addr blockAlign(Addr addr) const { return (addr & ~(Addr(dramCache_block_size - 1))); }
 
+    Addr fetchBlockAlign(Addr addr) const { return (addr & ~(Addr(dramCache_fetch_size - 1))); }
+
     /**
      * Marks the access path of the cache as blocked for the given cause. This
      * also sets the blocked flag in the slave interface.
@@ -544,7 +558,7 @@ class DRAMCacheCtrl : public DRAMCtrl
         // check that the address is block aligned since we rely on
         // this in a number of places when checking for matches and
         // overlap
-        assert(addr == blockAlign(addr));
+        // assert(addr == blockAlign(addr));
 
         MSHR *mshr = mq->allocate(addr, size, pkt, time, order++);
 
@@ -582,7 +596,8 @@ class DRAMCacheCtrl : public DRAMCtrl
         DPRINTF(DRAMCache,"Allocating MSHR for blkaddr %d size %d\n",
                 blockAlign(pkt->getAddr()), dramCache_block_size);
         return allocateBufferInternal(&mshrQueue,
-                                      blockAlign(pkt->getAddr()), dramCache_block_size,
+                                      fetchBlockAlign(pkt->getAddr()),
+									  dramCache_fetch_size,
                                       pkt, time, sched_send);
     }
 
