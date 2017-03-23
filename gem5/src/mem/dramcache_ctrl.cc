@@ -1130,7 +1130,7 @@ DRAMCacheCtrl::processRespondEvent ()
 
 				// check if there is already an MSHR allocated for this addr
 				// this MSHR could have been allocated because of another PAM Req
-				Addr blk_addr = blockAlign(dram_pkt->pkt->getAddr());
+				Addr blk_addr = fetchBlockAlign(dram_pkt->pkt->getAddr());
 				MSHR *mshr = mshrQueue.findMatch (blk_addr, false);
 				if (mshr)
 				{
