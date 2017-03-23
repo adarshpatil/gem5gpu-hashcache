@@ -37,7 +37,7 @@ class DRAMCacheCtrl(DRAMCtrl):
 
     fill_buffer_size = Param.Unsigned(128, "Number of fill queue entries")
 
-    prediction_accuracy = Param.Unsigned(95, "Required prediction accuracy")
+    prediction_accuracy = Param.Unsigned(80, "Required prediction accuracy")
 
     # bypass tag store - fully assocative structure
     bypass_tag_enable = Param.Bool(False,"enable bypass tag store")

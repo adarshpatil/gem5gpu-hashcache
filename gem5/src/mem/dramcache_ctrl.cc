@@ -419,11 +419,11 @@ DRAMCacheCtrl::decodeAddr (PacketPtr pkt, Addr dramPktAddr, unsigned int size,
 	// decode the address based on the address mapping scheme, with
 	// Ro, Ra, Co, Ba and Ch denoting row, rank, column, bank and
 	// channel, respectively
-	uint8_t rank;
-	uint8_t bank;
+	uint8_t rank = 0;
+	uint8_t bank = 0;
 	// use a 64-bit unsigned during the computations as the row is
 	// always the top bits, and check before creating the DRAMPacket
-	uint64_t row;
+	uint64_t row = 0;
 
 	//	ADARSH here the address should be the address of a set
 	//	cuz DRAMCache is addressed by set
@@ -951,7 +951,7 @@ DRAMCacheCtrl::processRespondEvent ()
 #ifdef MAPI_PREDICTOR
 			auto pamQueueItr =  pamQueue.find(fetchBlockAlign(dram_pkt->pkt->getAddr()));
 			bool isInPamQueue = (pamQueueItr != pamQueue.end());
-			if (isInPamQueue && (pamQueueItr->second->pkt == dram_pkt->pkt))
+			if (isInPamQueue && (pamQueueItr->second->pkt == dram_pkt->pkt) && (!pamQueueItr->second->junk))
 			{
 				// the second part of the condition is for this
 				// only the packet that created pamReq packet comes here
@@ -1090,6 +1090,10 @@ DRAMCacheCtrl::processRespondEvent ()
 						mq->deallocate(pr->mshr);
 						if (wasFull && !mq->isFull())
 							clearBlocked ((BlockedCause) mq->index);
+
+						// mark this PAM entry as junk now
+						// it exists only to track the return from memory req
+						pr->junk = true;
 
 						// if mshr is not inService i.e. mshr request has not
 						// sent to memory, deallocate pamQ entry here itself
@@ -1971,6 +1975,8 @@ DRAMCacheCtrl::recvTimingResp (PacketPtr pkt)
 		}
 		else if (pr->isHit == true)
 		{
+			// this should be a junk PAMQ
+			assert(pr->junk);
 			// do nothing here , delete packet and pamQueue done later
 			// as they are common between isHit true and false
 
@@ -2396,7 +2402,6 @@ DRAMCacheCtrl::drain()
         return DrainState::Drained;
     }
 }
-
 
 void
 DRAMCacheCtrl::LRUTagStore::regStats()

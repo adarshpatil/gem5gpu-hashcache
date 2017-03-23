@@ -189,10 +189,16 @@ class DRAMCacheCtrl : public DRAMCtrl
 		bool isPamComplete; // true if parallel memory request has returned
 		MSHR* mshr;
 		PacketPtr pkt;
+		// miss pred that went to memory; we dealloc MSHR but keep the PAMQ entry
+		// this is so that when the memory req returns we know what to do
+		// this flag just indicates that this pam entry was a read hit
+		// its MSHR has been dealloc and its just to track the req return from mem
+		bool junk;
 		pamReq()
 		{
 			isPamComplete = false;
 			isHit = -1;
+			junk = false;
 		}
 	}pamReq;
 	std::map<Addr,pamReq*> pamQueue;
@@ -594,7 +600,7 @@ class DRAMCacheCtrl : public DRAMCtrl
             dramCache_max_mshr_used = mshrQueue.allocated+1;
 
         DPRINTF(DRAMCache,"Allocating MSHR for blkaddr %d size %d\n",
-                blockAlign(pkt->getAddr()), dramCache_block_size);
+                blockAlign(pkt->getAddr()), dramCache_fetch_size);
         return allocateBufferInternal(&mshrQueue,
                                       fetchBlockAlign(pkt->getAddr()),
 									  dramCache_fetch_size,
