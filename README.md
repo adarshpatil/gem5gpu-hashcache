@@ -13,5 +13,5 @@ A fork of the popular [gem5-gpu](https://gem5-gpu.cs.wisc.edu/wiki/) simulator
 - Scripts to run workload mixes from the paper (regression/runme.py)
 - Several stability fixes throughout the code to run the heterogenous SPEC+Rodinia workload
  
-[1] Adarsh Patil and Ramaswamy Govindarajan, HAShCache: Heterogeneity-Aware Shared DRAMCache forIntegrated Heterogeneous Systems, ACM Trans. Archit. Code Optim. (TACO) 14, 4, Article 51, December 2017 <br/>
+[1] Adarsh Patil and Ramaswamy Govindarajan, HAShCache: Heterogeneity-Aware Shared DRAMCache for Integrated Heterogeneous Systems, ACM Trans. Archit. Code Optim. (TACO) 14, 4, Article 51, December 2017 <br/>
 [2] Jason  Power et. al.,  Heterogeneous system co-herence for integrated cpu-gpu systems, MICRO-46, 2013
