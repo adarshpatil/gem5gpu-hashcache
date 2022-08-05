@@ -1,8 +1,11 @@
 # HAShCache: Shared DRAM Cache for Integrated CPU+GPU Systems
 
-HAShCache is a shared last-level die-stacked DRAM cache for a integrated heterogeneous CPU-GPU processor.
-HAShCache is heterogeneity-aware and can adapt dynamically to address the inherent disparity of demands in such an architecture.
-It combines an intelligent DRAM request scheduler (PrIS), a selective temporal bypass scheme (ByE) and an cache-line occupancy controlling mechanism (Chaining).
+HAShCache is a shared last-level die-stacked DRAM cache for a integrated heterogeneous CPU-GPU processor.\
+HAShCache can adapt dynamically to address the inherent disparity of demands in integrated CPU-GPU processors (heterogeneity-aware). \
+HAShCache proposes an intelligent DRAM cache controller which employs an 
+1. intelligent DRAM request scheduler (PrIS) 
+2. a selective temporal bypass scheme (ByE) 
+3. cache-line occupancy controlling mechanism (Chaining).
 
 More details in [TACO '17](https://dl.acm.org/authorize.cfm?key=N42646) paper and at [http://adar.sh/hashcache-acm-taco](http://adar.sh/hashcache-acm-taco)
 
@@ -17,6 +20,30 @@ Implements PrIS, ByE and Chaining mechanisms (gem5/src/mem/dramcache_ctrl.cc)
 Scripts to run workload mixes from the paper (regression/runme.py)
 - **Stability fixes**  <br/>
 several fixes throughout the code to run the heterogenous SPEC+Rodinia workload
+
+## Referencing our work
+If you are using Dvé for your work, please cite:**
+
+```
+@article{hashcache-taco17,
+   author = {Patil, Adarsh and Govindarajan, Ramaswamy},
+   title = {HAShCache: Heterogeneity-Aware Shared DRAMCache for Integrated Heterogeneous Systems},
+   year = {2017},
+   issue_date = {December 2017},
+   publisher = {Association for Computing Machinery},
+   address = {New York, NY, USA},
+   volume = {14},
+   number = {4},
+   issn = {1544-3566},
+   url = {https://doi.org/10.1145/3158641},
+   doi = {10.1145/3158641},
+   journal = {ACM Trans. Archit. Code Optim.},
+   month = {dec},
+   articleno = {51},
+   numpages = {26},
+   keywords = {3D-stacked memory, Integrated CPU-GPU processors, cache sharing, DRAM cache}
+}
+```
 
 
 ## The original [gem5-gpu](https://gem5-gpu.cs.wisc.edu/wiki/) simulator
